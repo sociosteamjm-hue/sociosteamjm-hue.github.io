@@ -945,6 +945,11 @@
   function openPublicRequestReview(request) {
     if (!request || !can('managePublicRequests')) return;
     state.selectedPublicRequest = request;
+    state.publicRequestDecision = null;
+    setHidden(byId('request-decision-options'), true);
+    setValue('request-send-response', 'no');
+    setValue('request-issue-receipt', 'yes');
+    setValue('request-send-receipt', 'no');
     setValue('request-review-id', request.id);
     setText('request-review-title', publicRequestTypeLabel(request.request_type));
     setText('request-review-reference', 'PED-' + request.request_number);
@@ -981,7 +986,7 @@
 
   function setPublicRequestReviewPending(pending) {
     state.pendingPublicRequest = pending;
-    ['approve-public-request', 'reject-public-request', 'cancel-request-review', 'close-request-review']
+    ['approve-public-request', 'reject-public-request', 'cancel-request-review', 'close-request-review', 'confirm-request-decision', 'back-request-decision', 'request-send-response', 'request-issue-receipt', 'request-send-receipt']
       .forEach(function (id) {
         var control = byId(id);
         if (control) control.disabled = pending;
@@ -995,6 +1000,27 @@
     }
   }
 
+  function preparePublicRequestDecision(decision) {
+    var request = state.selectedPublicRequest;
+    if (!request || request.status !== 'pending' || state.pendingPublicRequest || !can('managePublicRequests')) return;
+    if (decision === 'reject' && !valueOf('request-review-notes')) {
+      showToast('Indique o motivo da rejeição nas notas da revisão.', true);
+      byId('request-review-notes').focus();
+      return;
+    }
+    state.publicRequestDecision = decision;
+    var payment = decision === 'approve' && request.request_type !== 'membership';
+    setText('request-decision-title', decision === 'approve' ? 'Confirmar aprovação' : 'Confirmar rejeição');
+    setText('request-decision-summary', 'Pedido PED-' + request.request_number + '. ' + (decision === 'reject' ? 'O pedido ficará rejeitado.' : payment ? 'O pagamento será registado.' : 'Será criado um novo sócio.') + ' Destinatário dos emails: ' + request.email);
+    setText('confirm-request-decision', decision === 'approve' ? 'Confirmar aprovação' : 'Confirmar rejeição');
+    setHidden(byId('request-issue-receipt-field'), !payment);
+    setHidden(byId('request-send-receipt-field'), !payment || valueOf('request-issue-receipt') !== 'yes');
+    setHidden(byId('approve-public-request'), true);
+    setHidden(byId('reject-public-request'), true);
+    setHidden(byId('request-decision-options'), false);
+    byId('request-decision-title').focus();
+  }
+
   async function reviewPublicRequest(decision) {
     var request = state.selectedPublicRequest;
     if (!request || request.status !== 'pending' || state.pendingPublicRequest || !can('managePublicRequests')) return;
@@ -1005,19 +1031,10 @@
       return;
     }
 
-    var actionLabel = decision === 'approve' ? 'aprovar' : 'rejeitar';
-    var consequence = request.request_type === 'membership'
-      ? 'A aprovação irá criar um novo sócio.'
-      : 'A aprovação irá registar o pagamento.';
-    if (!window.confirm(
-      'Pretende ' + actionLabel + ' o pedido PED-' + request.request_number + '?\n\n' +
-      (decision === 'approve' ? consequence : 'O pedido ficará registado como rejeitado.')
-    )) return;
-
-    var sendResponse = window.confirm('Enviar a resposta ao pedido para ' + request.email + '? As notas da revisão serão incluídas no email.');
-    var issueRequested = decision === 'approve' && request.request_type !== 'membership'
-      ? window.confirm('Pretende emitir um recibo deste pagamento?') : false;
-    var sendReceipt = issueRequested && window.confirm('Enviar também o recibo para ' + request.email + '?');
+    if (decision !== 'approve' && decision !== 'reject') return;
+    var sendResponse = valueOf('request-send-response') === 'yes';
+    var issueRequested = decision === 'approve' && request.request_type !== 'membership' && valueOf('request-issue-receipt') === 'yes';
+    var sendReceipt = issueRequested && valueOf('request-send-receipt') === 'yes';
     setPublicRequestReviewPending(true);
     try {
       var result = await state.client.rpc('review_public_request', {
@@ -1693,7 +1710,7 @@
       if (result.error || !result.data || !result.data.ok) throw new Error('email');
       return true;
     } catch (_error) {
-      window.alert('O registo foi guardado, mas o email não foi confirmado. Verifique a configuração do envio. Não volte a emitir o recibo; pode tentar enviar o recibo existente pelo botão Enviar por email.');
+      showToast('O registo foi guardado, mas o email não foi confirmado. Verifique a configuração do envio. Não volte a emitir o recibo.', true);
       return false;
     } finally { state.sendingEmail = false; }
   }
@@ -2316,7 +2333,7 @@
       'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       root
     ).filter(function (element) {
-      return !element.hidden && element.getAttribute('aria-hidden') !== 'true';
+      return !element.closest('[hidden], [aria-hidden="true"]');
     });
   }
 
@@ -2515,10 +2532,25 @@
       closeDialog(byId('request-review-modal'));
     });
     listen(byId('approve-public-request'), 'click', function () {
-      reviewPublicRequest('approve');
+      preparePublicRequestDecision('approve');
     });
     listen(byId('reject-public-request'), 'click', function () {
-      reviewPublicRequest('reject');
+      preparePublicRequestDecision('reject');
+    });
+    listen(byId('confirm-request-decision'), 'click', function () {
+      reviewPublicRequest(state.publicRequestDecision);
+    });
+    listen(byId('back-request-decision'), 'click', function () {
+      state.publicRequestDecision = null;
+      setHidden(byId('request-decision-options'), true);
+      setHidden(byId('approve-public-request'), false);
+      setHidden(byId('reject-public-request'), false);
+      byId('approve-public-request').focus();
+    });
+    listen(byId('request-issue-receipt'), 'change', function () {
+      var issue = valueOf('request-issue-receipt') === 'yes';
+      setHidden(byId('request-send-receipt-field'), !issue);
+      if (!issue) setValue('request-send-receipt', 'no');
     });
     listen(byId('request-review-modal'), 'mousedown', function (event) {
       if (event.target === byId('request-review-modal')) {
