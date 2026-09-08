@@ -1,5 +1,9 @@
 # TEAM JM — UAT v3
 
+Para ativar recibos/respostas por Gmail e as opções de aprovação, seguir
+[EMAIL_SETUP.md](EMAIL_SETUP.md), incluindo migrações 005 e 006 e publicação
+da função send-email. As credenciais ficam apenas nos Secrets do Supabase.
+
 This directory is the v3 application upgrade for the existing pre-live Supabase database used by UAT v2. It intentionally keeps the same Supabase URL and browser-safe publishable key. No second Supabase project is required while this database remains the shared pre-live environment.
 
 The database design includes:

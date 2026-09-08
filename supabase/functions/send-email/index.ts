@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
+import nodemailer from 'npm:nodemailer@9';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const reply = (status: number, data: unknown) => new Response(JSON.stringify(data), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -17,11 +18,9 @@ Deno.serve(async (req: Request) => {
     if (!profile || !['admin', 'staff'].includes(profile.role)) return reply(403, { error: 'Not permitted' });
     const input = await req.json();
     if (!['receipt', 'decision'].includes(input.kind)) return reply(400, { error: 'Invalid kind' });
-    // Gmail is a planned configuration, not a valid Resend sender.
-    if ((Deno.env.get('EMAIL_PROVIDER') || 'resend') !== 'resend') return reply(503, { error: 'Selected email provider is not implemented yet' });
-    const apiKey = Deno.env.get('RESEND_API_KEY');
-    const from = Deno.env.get('EMAIL_FROM');
-    if (!apiKey || !from) return reply(503, { error: 'Email service is not configured' });
+    const from = (Deno.env.get('EMAIL_FROM') || '').trim();
+    const password = (Deno.env.get('GMAIL_APP_PASSWORD') || '').replace(/\s/g, '');
+    if (!/^[^\s@<>]+@gmail\.com$/i.test(from) || !password) return reply(503, { error: 'Configure EMAIL_FROM e GMAIL_APP_PASSWORD nos Secrets da função.' });
     let recipient: string;
     let subject: string;
     let text: string;
@@ -59,14 +58,36 @@ Deno.serve(async (req: Request) => {
     if (inserted.error && inserted.error.code !== '23505') return reply(500, { error: 'Cannot record delivery' });
     const { data: delivery, error: readError } = await admin.from('email_deliveries').select('*').eq('id', key).single();
     if (readError || !delivery) return reply(500, { error: 'Cannot read delivery' });
+    if (delivery.payload.to[0].toLowerCase() !== recipient.toLowerCase()) return reply(409, { error: 'Este documento já tem um envio registado para outro destinatário.' });
     if (delivery.sent_at) return reply(200, { ok: true, already_sent: true });
-    // Resend deduplicates retries for 24h. Older uncertain attempts require manual verification.
-    if (Date.now() - Date.parse(delivery.created_at) > 23 * 3600 * 1000) return reply(409, { error: 'Verify delivery in provider before retrying' });
-    const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json', 'Idempotency-Key': key }, body: JSON.stringify(delivery.payload) });
-    if (!response.ok) return reply(502, { error: 'Email provider rejected delivery' });
-    const sent = await response.json();
-    const recorded = await admin.from('email_deliveries').update({ sent_at: new Date().toISOString(), provider_id: sent.id }).eq('id', key);
-    if (recorded.error) return reply(502, { error: 'Delivery accepted, recording failed; retry safely within 23h' });
+    if (delivery.payload.from !== from) return reply(409, { error: 'Existe um envio pendente com o remetente anterior. Peça verificação ao administrador.' });
+    // SMTP has no idempotency key: atomically claim once, and never retry an
+    // uncertain send automatically (including worker termination after acceptance).
+    const claim = await admin.from('email_deliveries').update({ attempted_at: new Date().toISOString() }).eq('id', key).is('attempted_at', null).is('sent_at', null).select('id').maybeSingle();
+    if (claim.error) return reply(500, { error: 'Não foi possível preparar o envio. Verifique a migração 006.' });
+    if (!claim.data) return reply(409, { error: 'Envio em curso ou por confirmar. Verifique os Enviados do Gmail antes de voltar a tentar.' });
+    const transport = nodemailer.createTransport({
+      host: 'smtp.gmail.com', port: 465, secure: true,
+      auth: { user: from, pass: password },
+      connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
+      disableFileAccess: true, disableUrlAccess: true,
+    });
+    let messageId: string;
+    try {
+      // Verify authentication before submission; failures here cannot send mail.
+      try { await transport.verify(); }
+      catch (_error) {
+        await admin.from('email_deliveries').update({ attempted_at: null }).eq('id', key).is('sent_at', null);
+        return reply(502, { error: 'Não foi possível ligar ao Gmail. Verifique a conta e a palavra-passe de aplicação nos Secrets.' });
+      }
+      const sent = await transport.sendMail({ ...delivery.payload, messageId: '<' + key + '@team-jm.invalid>' });
+      if (!sent.accepted?.length) return reply(502, { error: 'O Gmail não confirmou a aceitação. Peça verificação ao administrador antes de repetir.' });
+      messageId = sent.messageId;
+    } catch (_error) {
+      return reply(502, { error: 'Envio não confirmado. Verifique os Enviados do Gmail antes de repetir; o recibo continua guardado.' });
+    } finally { transport.close(); }
+    const recorded = await admin.from('email_deliveries').update({ sent_at: new Date().toISOString(), provider_id: messageId }).eq('id', key);
+    if (recorded.error) return reply(502, { error: 'O Gmail aceitou o email, mas falhou o registo. Não repita sem verificar os Enviados.' });
     return reply(200, { ok: true });
   } catch (_error) { return reply(500, { error: 'Unable to send email' }); }
 });

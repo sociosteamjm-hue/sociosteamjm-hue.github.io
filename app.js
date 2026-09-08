@@ -1136,6 +1136,8 @@
     }
     var print = byId('print-receipt');
     if (print) print.disabled = !can('printReceipts') || !state.lastIssuedReceipt;
+    var emailButton = byId('email-receipt');
+    if (emailButton) emailButton.disabled = !manageable || state.pendingReceipt || state.sendingEmail || !state.lastIssuedReceipt;
   }
 
   function switchView(view) {
@@ -1705,14 +1707,33 @@
 
   async function sendEmail(body) {
     state.sendingEmail = true;
+    var label = body.kind === 'receipt' ? 'Recibo' : 'Resposta ao pedido';
     try {
       var result = await state.client.functions.invoke('send-email', { body: body });
-      if (result.error || !result.data || !result.data.ok) throw new Error('email');
+      if (result.error || !result.data || !result.data.ok) {
+        var detail = result.data && result.data.error;
+        if (result.error && result.error.context && typeof result.error.context.json === 'function') {
+          try { detail = (await result.error.context.json()).error; } catch (_parseError) {}
+        }
+        throw new Error(detail || 'Verifique a configuração da função send-email no Supabase.');
+      }
+      appendEmailStatus(label + (result.data.already_sent ? ': envio já registado anteriormente.' : ': envio aceite pelo Gmail. Confirme a receção com o destinatário.'));
       return true;
-    } catch (_error) {
+    } catch (error) {
+      appendEmailStatus(label + ': email não confirmado. ' + error.message + ' O registo continua guardado; não volte a emitir o recibo.');
       showToast('O registo foi guardado, mas o email não foi confirmado. Verifique a configuração do envio. Não volte a emitir o recibo.', true);
       return false;
     } finally { state.sendingEmail = false; }
+  }
+
+  function appendEmailStatus(message) {
+    var status = byId('email-delivery-status');
+    if (!status) return;
+    var line = document.createElement('p');
+    line.textContent = message;
+    status.appendChild(line);
+    while (status.children.length > 4) status.removeChild(status.firstElementChild);
+    setHidden(status, false);
   }
 
   function renderReceiptPreview(receipt, status) {
@@ -1766,6 +1787,9 @@
       return;
     }
     state.lastIssuedReceipt = receipt;
+    var receiptMember = state.members.find(function (member) { return member.id === receipt.member_id; });
+    var receiptRequest = state.publicRequests.find(function (request) { return request.receipt_id === receipt.id; });
+    setValue('receipt-email', receiptRequest ? receiptRequest.email : receiptMember ? receiptMember.email || '' : '');
     renderIssuedReceipt(receipt);
     applyReceiptPermissions();
     var preview = byId('receipt-print-sheet');
@@ -2314,6 +2338,8 @@
   }
 
   function closeAllModals() {
+    var emailStatus = byId('email-delivery-status');
+    if (emailStatus) { emailStatus.textContent = ''; setHidden(emailStatus, true); }
     ['member-modal', 'import-modal', 'request-review-modal'].forEach(function (id) {
       var modal = byId(id);
       if (!modal) return;

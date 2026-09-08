@@ -148,6 +148,7 @@
         </div>
       </header>
 
+      <div id="email-delivery-status" class="form-hint" role="status" aria-live="polite" hidden></div>
       <section id="dashboard-view" class="view active-view" aria-labelledby="dashboard-heading">
         <div class="section-heading">
           <div>
@@ -682,7 +683,7 @@
         <label class="field" for="request-send-response"><span>Enviar a resposta por email? As notas da revisão serão incluídas.</span><select id="request-send-response"><option value="no">Não</option><option value="yes">Sim</option></select></label>
         <label id="request-issue-receipt-field" class="field" for="request-issue-receipt"><span>Emitir recibo deste pagamento?</span><select id="request-issue-receipt"><option value="yes">Sim</option><option value="no">Não</option></select></label>
         <label id="request-send-receipt-field" class="field" for="request-send-receipt"><span>Enviar também o recibo por email?</span><select id="request-send-receipt"><option value="no">Não</option><option value="yes">Sim</option></select></label>
-        <p class="form-hint">O envio por Gmail ainda não está ativo. Escolher Não não impede a aprovação nem a emissão do recibo.</p>
+        <p class="form-hint">O envio requer a configuração do Gmail no servidor. Escolher Não não impede a aprovação nem a emissão do recibo.</p>
         <div class="modal-actions">
           <button id="back-request-decision" class="button button-secondary" type="button">Voltar à revisão</button>
           <button id="confirm-request-decision" class="button button-primary" type="button">Confirmar</button>
