@@ -13,6 +13,8 @@ The database design includes:
 - donativos for people or entities that are not members;
 - an immutable payer-address snapshot on every newly issued receipt;
 - an editable live draft preview and reprinting from receipt history;
+- a Portuguese public page for membership applications, quota-payment notices, and donations;
+- manual staff/admin approval or rejection of public requests, with atomic member/receipt creation;
 - an `updated_at` value for optimistic concurrency checks; and
 - no unauthenticated/local-storage fallback.
 
@@ -24,9 +26,9 @@ Only when the existing database is completely empty should [`supabase/schema.sql
 
 ### Upgrade an existing UAT project
 
-For the existing database already running UAT v2, do **not** reinstall the full schema. Run [`supabase/migrations/003_external_donations_receipt_address.sql`](supabase/migrations/003_external_donations_receipt_address.sql) once in that same project's SQL Editor. It preserves all receipts, snapshots the best available member address onto historical receipts, and labels receipts whose old address cannot be reconstructed.
+For the existing database already running UAT v2, do **not** reinstall the full schema. Run [`supabase/migrations/003_external_donations_receipt_address.sql`](supabase/migrations/003_external_donations_receipt_address.sql) once in that same project's SQL Editor. It preserves all receipts, snapshots the best available member address onto historical receipts, and labels receipts whose old address cannot be reconstructed. Then run [`supabase/migrations/004_public_requests.sql`](supabase/migrations/004_public_requests.sql) to add the public-request workflow.
 
-If the database predates multi-year quota receipts, first run [`supabase/migrations/002_multi_year_quota_receipts.sql`](supabase/migrations/002_multi_year_quota_receipts.sql), then run migration `003`. Both migrations are transactional and must be applied in that order.
+If the database predates multi-year quota receipts, run migrations `002`, `003`, and `004`, in that order. All migrations are transactional and target the same pre-live database.
 
 ## 2. Create users and assign roles
 
@@ -74,6 +76,7 @@ Role capabilities are:
 | Archive members | Yes | Yes | No |
 | Issue receipts / mark a quota paid | Yes | Yes | No |
 | Preview and reprint stored receipts | Yes | Yes | Yes |
+| Review public requests | Yes | Yes | No |
 | Import Excel data | Yes | No | No |
 | Export from the application UI | Yes | No | No |
 
@@ -83,7 +86,7 @@ Import authorization is checked again inside the database RPC, so hiding a butto
 
 Open [`supabase-config.js`](supabase-config.js) and replace only:
 
-- `supabaseUrl` with the URL of the new UAT project; and
+- `supabaseUrl` with the URL of the existing pre-live Supabase project; and
 - `supabaseAnonKey` with that project's browser-safe publishable/anon key.
 
 The v3 configuration is already copied from UAT v2 so both versions target the same pre-live database. Never put a `service_role` key or database password in this file. A publishable/anon key identifies the project; RLS and the signed-in user's role provide authorization.
@@ -105,6 +108,21 @@ python -m http.server 8080 --directory uat-v3
 ```
 
 Then visit `http://localhost:8080/`. Stop the server with `Ctrl+C`.
+
+The public Portuguese form is available at `http://localhost:8080/public.html`. The login page also links to it, so a visitor does not need an application account.
+
+## Fluxo dos pedidos públicos
+
+A página pública permite pedir adesão como sócio, comunicar o pagamento de uma quota ou comunicar um donativo. Não cobra cartões nem confirma automaticamente transferências: o visitante indica os dados do pagamento já efetuado por transferência bancária ou MB WAY.
+
+Cada submissão fica com o estado **Pendente** e recebe uma referência `PED-número`. Apenas utilizadores `admin` ou `staff` conseguem ler estes pedidos. Na área **Pedidos**, a equipa deve confirmar os dados e o movimento bancário antes de aprovar:
+
+- uma adesão aprovada cria o novo sócio e atribui o próximo número disponível;
+- uma quota aprovada procura o sócio ativo, emite o recibo e marca o respetivo ano como pago na mesma transação;
+- um donativo aprovado emite um recibo sem exigir que o doador seja sócio;
+- uma rejeição exige uma nota e não cria sócio nem recibo.
+
+O formulário público nunca permite consultar a lista de pedidos, sócios ou recibos. Inclui um campo anti-bot invisível e limita cada endereço de email a cinco submissões por hora. Antes de uma futura publicação na Internet, recomenda-se acrescentar CAPTCHA/Turnstile e um mecanismo de email transacional caso seja necessário comunicar a decisão automaticamente.
 
 ## Theme behavior
 
@@ -167,6 +185,15 @@ Use separate test accounts for each role and synthetic member data.
 
 - [ ] With no valid UAT configuration, the app fails closed and does not save member data to local storage.
 - [ ] An unauthenticated visitor sees no member or receipt data.
+- [ ] An unauthenticated visitor can open `public.html`, but cannot query public requests directly.
+- [ ] Submit one membership, quota, and donation request and confirm each receives a `PED-` reference.
+- [ ] Confirm the public form and all validation/error messages are in Portuguese.
+- [ ] Confirm a viewer cannot see the **Pedidos** area or invoke the review operation.
+- [ ] As staff, reject a request with a reason and confirm that no member or receipt is created.
+- [ ] As staff, approve a membership request and confirm exactly one new member number is created.
+- [ ] As staff, approve a quota request after checking the payment; confirm one receipt is issued and the quota year becomes paid.
+- [ ] As staff, approve a non-member donation; confirm the receipt contains the submitted name/NIF/Morada.
+- [ ] Try to review the same request twice or concurrently and confirm the second attempt is rejected.
 - [ ] A newly created user starts as `viewer`.
 - [ ] A viewer can search/view data but cannot create, edit, archive, import, export through the UI, or issue a receipt.
 - [ ] A staff user can create/edit/archive a member and issue a receipt, but cannot import or export through the UI.

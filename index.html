@@ -55,7 +55,7 @@
       <div class="login-heading">
         <p class="eyebrow">Área reservada</p>
         <h1 id="login-title">Iniciar sessão</h1>
-        <p>Use a conta atribuída pela associação para aceder aos dados partilhados.</p>
+
       </div>
 
       <label class="field" for="login-email">
@@ -68,6 +68,14 @@
       </label>
       <button id="login-button" class="button button-primary button-block" type="submit">Entrar</button>
       <p id="login-error" class="form-message form-message--error" role="alert" aria-live="assertive"></p>
+      <div class="public-entry-link">
+        <span>Não tem acesso à área reservada?</span>
+        <a class="button button-secondary button-block" href="public.html">Tornar-me sócio, pagar quota ou doar</a>
+      </div>
+      <nav class="social-links" aria-label="Redes sociais Team JM">
+        <a href="https://www.facebook.com/share/1LRqaKSXZt/?mibextid=wwXIfr" target="_blank" rel="noopener noreferrer" class="button button-secondary" aria-label="Facebook Team JM (nova janela)">Facebook</a>
+        <a href="https://www.instagram.com/teamjm2026/" target="_blank" rel="noopener noreferrer" class="button button-secondary" aria-label="Instagram Team JM (nova janela)">Instagram</a>
+      </nav>
     </form>
   </section>
 
@@ -93,6 +101,10 @@
         <button class="nav-item" type="button" data-view="receipts" aria-controls="receipts-view">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h12a2 2 0 0 1 2 2v18l-3-2-3 2-3-2-3 2-3-2-3 2V6a4 4 0 0 1 4-4Zm0 2a2 2 0 0 0-2 2v12.26l1-.67 1 .67V4Zm3 3v2h8V7H9Zm0 4v2h8v-2H9Zm0 4v2h5v-2H9Z"/></svg>
           <span>Recibos</span>
+        </button>
+        <button class="nav-item" type="button" data-view="requests" aria-controls="requests-view" data-role-allow="admin,staff" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 2v9h4l2 2h4l2-2h4V5H4Zm0 11v3h16v-3h-3.2l-2 2H9.2l-2-2H4Z"/></svg>
+          <span>Pedidos <b id="pending-request-count" class="nav-count" hidden>0</b></span>
         </button>
       </nav>
 
@@ -344,6 +356,7 @@
                 <span>Morada <b aria-hidden="true">*</b></span>
                 <textarea id="receipt-address" rows="2" maxlength="500" autocomplete="street-address" required></textarea>
               </label>
+              <label class="field field-wide" for="receipt-email"><span>Email para envio do recibo (opcional)</span><input id="receipt-email" type="email" maxlength="320" autocomplete="email"></label>
               <label class="field field-wide" for="receipt-description">
                 <span>Descrição / referência <b aria-hidden="true">*</b></span>
                 <input id="receipt-description" type="text" maxlength="500" value="Quota" required>
@@ -352,6 +365,7 @@
             <p class="form-hint">Ao emitir uma quota, todos os anos selecionados serão atualizados no registo do sócio. A descrição do recibo identifica também os anos pagos anteriormente.</p>
             <div class="form-actions">
               <button id="issue-receipt-button" class="button button-primary" type="submit" data-role-allow="admin,staff" hidden>Emitir e guardar</button>
+              <button id="email-receipt" class="button button-secondary" type="button" data-role-allow="admin,staff" hidden>Enviar por email</button>
               <button id="print-receipt" class="button button-secondary" type="button" disabled>Imprimir recibo</button>
             </div>
           </form>
@@ -435,6 +449,50 @@
                 </tr>
               </thead>
               <tbody id="receipt-history"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="requests-view" class="view" aria-labelledby="requests-heading" hidden data-role-allow="admin,staff">
+        <div class="section-heading section-heading--members">
+          <div>
+            <p class="eyebrow">Área reservada</p>
+            <h2 id="requests-heading">Pedidos públicos</h2>
+            <p>Confirme os dados e o pagamento antes de aprovar cada pedido.</p>
+          </div>
+          <label class="compact-field" for="request-status-filter">
+            <span>Estado</span>
+            <select id="request-status-filter">
+              <option value="pending">Pendentes</option>
+              <option value="all">Todos</option>
+              <option value="approved">Aprovados</option>
+              <option value="rejected">Rejeitados</option>
+            </select>
+          </label>
+        </div>
+
+        <section class="panel table-panel" aria-labelledby="request-table-summary">
+          <div class="table-summary">
+            <strong id="request-table-summary">0 pedidos</strong>
+            <span class="muted">Os pagamentos são sempre confirmados manualmente.</span>
+          </div>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="Pedidos públicos; desloque horizontalmente para ver todas as colunas">
+            <table>
+              <caption class="sr-only">Pedidos de adesão, pagamento de quota e donativo</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Referência</th>
+                  <th scope="col">Data</th>
+                  <th scope="col">Tipo</th>
+                  <th scope="col">Nome / entidade</th>
+                  <th scope="col">N.º sócio</th>
+                  <th scope="col">Valor</th>
+                  <th scope="col">Estado</th>
+                  <th scope="col"><span class="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody id="public-requests-table"></tbody>
             </table>
           </div>
         </section>
@@ -573,6 +631,57 @@
       <div class="modal-actions modal-actions--end">
         <button id="cancel-import" class="button button-secondary" type="button">Cancelar</button>
         <button id="confirm-import-button" class="button button-primary" type="button" disabled>Importar registos</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="request-review-modal" class="modal-backdrop" hidden aria-hidden="true">
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="request-review-title" aria-describedby="request-review-description">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Revisão de pedido</p>
+          <h2 id="request-review-title">Pedido público</h2>
+          <p id="request-review-description">Confirme os dados antes de tomar uma decisão.</p>
+        </div>
+        <button id="close-request-review" class="icon-button" type="button" aria-label="Fechar revisão">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.7 5.3 5.3 5.3 5.3-5.3 1.4 1.4-5.3 5.3 5.3 5.3-1.4 1.4-5.3-5.3-5.3 5.3-1.4-1.4 5.3-5.3-5.3-5.3 1.4-1.4Z"/></svg>
+        </button>
+      </div>
+
+      <input id="request-review-id" type="hidden">
+      <div class="request-review-summary">
+        <span id="request-review-status" class="status status-neutral">Pendente</span>
+        <strong id="request-review-reference">PED-—</strong>
+      </div>
+      <dl class="request-review-grid">
+        <div><dt>Tipo</dt><dd id="request-review-type">—</dd></div>
+        <div><dt>Submetido em</dt><dd id="request-review-date">—</dd></div>
+        <div><dt>Nome / entidade</dt><dd id="request-review-name">—</dd></div>
+        <div><dt>Email</dt><dd id="request-review-email">—</dd></div>
+        <div><dt>Contacto</dt><dd id="request-review-contact">—</dd></div>
+        <div><dt>NIF / NIPC</dt><dd id="request-review-nif">—</dd></div>
+        <div class="request-review-wide"><dt>Morada</dt><dd id="request-review-address">—</dd></div>
+        <div><dt>N.º sócio</dt><dd id="request-review-member">—</dd></div>
+        <div><dt>Ano da quota</dt><dd id="request-review-year">—</dd></div>
+        <div><dt>Valor comunicado</dt><dd id="request-review-amount">—</dd></div>
+        <div><dt>Método</dt><dd id="request-review-payment">—</dd></div>
+        <div><dt>Data do pagamento</dt><dd id="request-review-payment-date">—</dd></div>
+        <div class="request-review-wide"><dt>Referência do pagamento</dt><dd id="request-review-payment-reference">—</dd></div>
+        <div class="request-review-wide"><dt>Mensagem</dt><dd id="request-review-message">—</dd></div>
+      </dl>
+
+      <label class="field" for="request-review-notes">
+        <span>Notas da revisão <small id="request-review-notes-help">Obrigatórias em caso de rejeição.</small></span>
+        <textarea id="request-review-notes" rows="3" maxlength="2000"></textarea>
+      </label>
+
+      <p id="request-review-warning" class="form-hint"><strong>Atenção:</strong> aprove apenas depois de confirmar os dados e, quando aplicável, o pagamento.</p>
+      <div class="modal-actions">
+        <button id="reject-public-request" class="button button-danger" type="button">Rejeitar pedido</button>
+        <div class="primary-actions">
+          <button id="cancel-request-review" class="button button-secondary" type="button">Cancelar</button>
+          <button id="approve-public-request" class="button button-primary" type="button">Aprovar pedido</button>
+        </div>
       </div>
     </section>
   </div>

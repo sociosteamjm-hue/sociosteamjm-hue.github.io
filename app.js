@@ -7,11 +7,24 @@
     viewer: 'Consulta'
   };
 
+  var PUBLIC_REQUEST_TYPE_LABELS = {
+    membership: 'Adesão de sócio',
+    quota: 'Pagamento de quota',
+    donation: 'Donativo'
+  };
+
+  var PUBLIC_REQUEST_STATUS_LABELS = {
+    pending: 'Pendente',
+    approved: 'Aprovado',
+    rejected: 'Rejeitado'
+  };
+
   var CAPABILITIES = {
     admin: {
       manageMembers: true,
       manageReceipts: true,
       printReceipts: true,
+      managePublicRequests: true,
       importMembers: true,
       exportData: true
     },
@@ -19,6 +32,7 @@
       manageMembers: true,
       manageReceipts: true,
       printReceipts: true,
+      managePublicRequests: true,
       importMembers: false,
       exportData: false
     },
@@ -26,6 +40,7 @@
       manageMembers: false,
       manageReceipts: false,
       printReceipts: true,
+      managePublicRequests: false,
       importMembers: false,
       exportData: false
     }
@@ -39,16 +54,19 @@
     profile: null,
     members: [],
     receipts: [],
+    publicRequests: [],
     selectedYear: null,
     years: [],
     importDraft: null,
     lastIssuedReceipt: null,
+    selectedPublicRequest: null,
     activeModal: null,
     focusBeforeModal: null,
     authQueue: Promise.resolve(),
     authUserId: null,
     pendingMember: false,
     pendingReceipt: false,
+    pendingPublicRequest: false,
     pendingImport: false,
     toastTimer: null,
     denyingAccess: false
@@ -126,6 +144,7 @@
     state.profile = null;
     state.members = [];
     state.receipts = [];
+    state.publicRequests = [];
     disableAllActions();
     var setup = byId('setup-screen');
     if (setup) {
@@ -154,7 +173,9 @@
       'print-receipt',
       'confirm-import-button',
       'remove-member-button',
-      'restore-member-button'
+      'restore-member-button',
+      'approve-public-request',
+      'reject-public-request'
     ].forEach(function (id) {
       var control = byId(id);
       if (control) control.disabled = true;
@@ -287,7 +308,9 @@
       state.authUserId = null;
       state.members = [];
       state.receipts = [];
+      state.publicRequests = [];
       state.lastIssuedReceipt = null;
+      state.selectedPublicRequest = null;
       closeAllModals();
       clearLoginPending();
       setScreen('login-screen');
@@ -332,6 +355,7 @@
     } catch (error) {
       state.members = [];
       state.receipts = [];
+      state.publicRequests = [];
       renderAll();
       setScreen('app-shell');
       showToast(explainError(error, 'Não foi possível carregar os dados.'), true);
@@ -343,6 +367,7 @@
     state.authUserId = null;
     state.members = [];
     state.receipts = [];
+    state.publicRequests = [];
     if (state.denyingAccess) return;
     state.denyingAccess = true;
     try {
@@ -382,10 +407,14 @@
   async function refreshData() {
     var results = await Promise.all([
       fetchAllRows('members', 'member_number', true),
-      fetchAllRows('receipts', 'receipt_number', false)
+      fetchAllRows('receipts', 'receipt_number', false),
+      can('managePublicRequests')
+        ? fetchAllRows('public_requests', 'submitted_at', false)
+        : Promise.resolve([])
     ]);
     state.members = results[0].map(normalizeMember);
     state.receipts = results[1].map(normalizeReceipt);
+    state.publicRequests = results[2].map(normalizePublicRequest);
     renderAll();
   }
 
@@ -413,6 +442,19 @@
     copy.amount = Number(copy.amount);
     copy.quota_years = normalizeQuotaYears(copy.quota_years, copy.quota_year);
     copy.quota_year = copy.quota_years.length ? copy.quota_years[0] : null;
+    return copy;
+  }
+
+  function normalizePublicRequest(row) {
+    var copy = Object.assign({}, row || {});
+    copy.request_number = Number(copy.request_number);
+    copy.member_number = copy.member_number == null || copy.member_number === ''
+      ? null
+      : Number(copy.member_number);
+    copy.quota_year = copy.quota_year == null || copy.quota_year === ''
+      ? null
+      : Number(copy.quota_year);
+    copy.amount = copy.amount == null || copy.amount === '' ? null : Number(copy.amount);
     return copy;
   }
 
@@ -473,6 +515,16 @@
     return parts[2] + '/' + parts[1] + '/' + parts[0];
   }
 
+  function dateTimeForDisplay(value) {
+    if (!value) return '—';
+    var date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('pt-PT', {
+      dateStyle: 'short',
+      timeStyle: 'short'
+    });
+  }
+
   function createElement(tag, options) {
     var element = document.createElement(tag);
     var settings = options || {};
@@ -510,6 +562,7 @@
     renderReceiptMembers();
     renderReceiptYearOptions();
     renderReceiptHistory();
+    renderPublicRequests();
     renderFeeLabels();
     if (!state.lastIssuedReceipt) renderDraftReceipt();
   }
@@ -804,6 +857,197 @@
     setText('receipt-count', selectedYearCount);
   }
 
+  function publicRequestTypeLabel(type) {
+    return PUBLIC_REQUEST_TYPE_LABELS[type] || 'Pedido';
+  }
+
+  function publicRequestStatusLabel(status) {
+    return PUBLIC_REQUEST_STATUS_LABELS[status] || 'Desconhecido';
+  }
+
+  function publicRequestStatusBadge(status) {
+    return createElement('span', {
+      className: 'status status-request-' + (status || 'pending'),
+      text: publicRequestStatusLabel(status)
+    });
+  }
+
+  function filteredPublicRequests() {
+    var filter = valueOf('request-status-filter') || 'pending';
+    if (filter === 'all') return state.publicRequests.slice();
+    return state.publicRequests.filter(function (request) {
+      return request.status === filter;
+    });
+  }
+
+  function renderPublicRequests() {
+    var body = byId('public-requests-table');
+    var pendingCount = state.publicRequests.filter(function (request) {
+      return request.status === 'pending';
+    }).length;
+    var navCount = byId('pending-request-count');
+    if (navCount) {
+      navCount.textContent = String(pendingCount);
+      navCount.hidden = pendingCount === 0 || !can('managePublicRequests');
+    }
+    if (!body) return;
+
+    body.replaceChildren();
+    var requests = filteredPublicRequests();
+    requests.forEach(function (request) {
+      var row = document.createElement('tr');
+      appendCell(row, 'PED-' + request.request_number);
+      appendCell(row, dateTimeForDisplay(request.submitted_at));
+      appendCell(row, publicRequestTypeLabel(request.request_type));
+      appendCell(row, request.name || '—');
+      appendCell(row, request.member_number || '—');
+      appendCell(row, request.amount == null ? '—' : euro(request.amount));
+      appendCell(row, publicRequestStatusBadge(request.status));
+      var action = createElement('button', {
+        className: 'row-action',
+        text: request.status === 'pending' ? 'Rever' : 'Consultar',
+        type: 'button'
+      });
+      action.dataset.reviewPublicRequest = request.id;
+      action.setAttribute('aria-label',
+        (request.status === 'pending' ? 'Rever ' : 'Consultar ') +
+        'pedido PED-' + request.request_number
+      );
+      appendCell(row, action);
+      body.appendChild(row);
+    });
+
+    if (!requests.length) {
+      var emptyRow = document.createElement('tr');
+      var emptyCell = createElement('td', {
+        className: 'empty-table-cell',
+        text: valueOf('request-status-filter') === 'pending'
+          ? 'Não existem pedidos pendentes.'
+          : 'Não existem pedidos com este estado.'
+      });
+      emptyCell.colSpan = 8;
+      emptyRow.appendChild(emptyCell);
+      body.appendChild(emptyRow);
+    }
+
+    setText(
+      'request-table-summary',
+      requests.length + (requests.length === 1 ? ' pedido' : ' pedidos')
+    );
+  }
+
+  function publicRequestAddress(request) {
+    return [request.address, request.postal, request.locality]
+      .filter(function (value) { return Boolean(value); })
+      .join(', ') || '—';
+  }
+
+  function openPublicRequestReview(request) {
+    if (!request || !can('managePublicRequests')) return;
+    state.selectedPublicRequest = request;
+    setValue('request-review-id', request.id);
+    setText('request-review-title', publicRequestTypeLabel(request.request_type));
+    setText('request-review-reference', 'PED-' + request.request_number);
+    setText('request-review-type', publicRequestTypeLabel(request.request_type));
+    setText('request-review-date', dateTimeForDisplay(request.submitted_at));
+    setText('request-review-name', request.name || '—');
+    setText('request-review-email', request.email || '—');
+    setText('request-review-contact', request.contact || '—');
+    setText('request-review-nif', request.nif || '—');
+    setText('request-review-address', publicRequestAddress(request));
+    setText('request-review-member', request.member_number || '—');
+    setText('request-review-year', request.quota_year || '—');
+    setText('request-review-amount', request.amount == null ? '—' : euro(request.amount));
+    setText('request-review-payment', request.payment_method || '—');
+    setText('request-review-payment-date', dateForDisplay(request.payment_date));
+    setText('request-review-payment-reference', request.payment_reference || '—');
+    setText('request-review-message', request.message || '—');
+    setValue('request-review-notes', request.review_notes || '');
+
+    var status = byId('request-review-status');
+    if (status) {
+      status.className = 'status status-request-' + request.status;
+      status.textContent = publicRequestStatusLabel(request.status);
+    }
+    var pending = request.status === 'pending';
+    var notes = byId('request-review-notes');
+    if (notes) notes.readOnly = !pending;
+    setHidden(byId('request-review-warning'), !pending);
+    setHidden(byId('approve-public-request'), !pending);
+    setHidden(byId('reject-public-request'), !pending);
+    setPublicRequestReviewPending(false);
+    openDialog(byId('request-review-modal'), pending ? '#request-review-notes' : '#close-request-review');
+  }
+
+  function setPublicRequestReviewPending(pending) {
+    state.pendingPublicRequest = pending;
+    ['approve-public-request', 'reject-public-request', 'cancel-request-review', 'close-request-review']
+      .forEach(function (id) {
+        var control = byId(id);
+        if (control) control.disabled = pending;
+      });
+    var notes = byId('request-review-notes');
+    if (notes) notes.disabled = pending;
+    var modal = byId('request-review-modal');
+    if (modal) {
+      modal.dataset.pending = pending ? 'true' : 'false';
+      modal.setAttribute('aria-busy', pending ? 'true' : 'false');
+    }
+  }
+
+  async function reviewPublicRequest(decision) {
+    var request = state.selectedPublicRequest;
+    if (!request || request.status !== 'pending' || state.pendingPublicRequest || !can('managePublicRequests')) return;
+    var notes = valueOf('request-review-notes');
+    if (decision === 'reject' && !notes) {
+      showToast('Indique o motivo da rejeição nas notas da revisão.', true);
+      byId('request-review-notes').focus();
+      return;
+    }
+
+    var actionLabel = decision === 'approve' ? 'aprovar' : 'rejeitar';
+    var consequence = request.request_type === 'membership'
+      ? 'A aprovação irá criar um novo sócio.'
+      : 'A aprovação irá registar o pagamento.';
+    if (!window.confirm(
+      'Pretende ' + actionLabel + ' o pedido PED-' + request.request_number + '?\n\n' +
+      (decision === 'approve' ? consequence : 'O pedido ficará registado como rejeitado.')
+    )) return;
+
+    var sendResponse = window.confirm('Enviar a resposta ao pedido para ' + request.email + '? As notas da revisão serão incluídas no email.');
+    var issueRequested = decision === 'approve' && request.request_type !== 'membership'
+      ? window.confirm('Pretende emitir um recibo deste pagamento?') : false;
+    var sendReceipt = issueRequested && window.confirm('Enviar também o recibo para ' + request.email + '?');
+    setPublicRequestReviewPending(true);
+    try {
+      var result = await state.client.rpc('review_public_request', {
+        p_request_id: request.id,
+        p_decision: decision,
+        p_review_notes: notes || null,
+        p_issue_receipt: issueRequested
+      });
+      if (result.error) throw result.error;
+      var response = result.data || {};
+      if (sendResponse) await sendEmail({ kind: 'decision', request_id: request.id });
+      if (sendReceipt && response.receipt_id) await sendEmail({ kind: 'receipt', receipt_id: response.receipt_id, request_id: request.id });
+      await refreshData();
+      closeDialog(byId('request-review-modal'));
+      state.selectedPublicRequest = null;
+
+      var detail = '';
+      if (response.member_number) detail = ' Sócio n.º ' + response.member_number + ' criado/atualizado.';
+      if (response.receipt_number) detail += ' Recibo n.º ' + response.receipt_number + ' emitido.';
+      showToast(
+        'Pedido PED-' + request.request_number +
+        (decision === 'approve' ? ' aprovado.' : ' rejeitado.') + detail
+      );
+    } catch (error) {
+      showToast(explainError(error, error.message || 'Não foi possível rever o pedido.'), true);
+    } finally {
+      setPublicRequestReviewPending(false);
+    }
+  }
+
   function applyRoleToUi() {
     var role = state.profile ? state.profile.role : '';
     setText('user-email', state.session && state.session.user ? state.session.user.email : '');
@@ -878,6 +1122,7 @@
   }
 
   function switchView(view) {
+    if (view === 'requests' && !can('managePublicRequests')) return;
     var target = byId(view + '-view');
     if (!target) return;
 
@@ -898,7 +1143,8 @@
     var titles = {
       dashboard: 'Resumo de sócios',
       members: 'Listagem de sócios',
-      receipts: 'Recibos'
+      receipts: 'Recibos',
+      requests: 'Pedidos públicos'
     };
     setText('page-title', titles[view] || 'Team JM');
   }
@@ -1315,6 +1561,8 @@
   }
 
   function receiptMemberChanged() {
+    var emailMember = findMemberByReceiptSelection();
+    setValue('receipt-email', emailMember ? emailMember.email : '');
     var member = findMemberByReceiptSelection();
     setValue('receipt-name', member ? member.name : '');
     setValue('receipt-nif', member ? member.nif : '');
@@ -1410,6 +1658,9 @@
 
     try {
       var payload = receiptPayload();
+      var memberForEmail = findMemberByReceiptSelection();
+      var recipient = valueOf('receipt-email') || (memberForEmail && memberForEmail.email) || '';
+      var emailWanted = recipient && window.confirm('Enviar o recibo para ' + recipient + ' depois de emitido?');
       setReceiptPending(true);
       var result = await state.client.rpc('issue_receipt', { payload: payload });
       if (result.error) throw result.error;
@@ -1419,6 +1670,7 @@
       }
 
       state.lastIssuedReceipt = normalizeReceipt(receipt);
+      if (emailWanted) await sendEmail({ kind: 'receipt', receipt_id: receipt.id, recipient: recipient });
       await refreshData();
       renderIssuedReceipt(state.lastIssuedReceipt);
       applyReceiptPermissions();
@@ -1432,6 +1684,18 @@
     } finally {
       setReceiptPending(false);
     }
+  }
+
+  async function sendEmail(body) {
+    state.sendingEmail = true;
+    try {
+      var result = await state.client.functions.invoke('send-email', { body: body });
+      if (result.error || !result.data || !result.data.ok) throw new Error('email');
+      return true;
+    } catch (_error) {
+      window.alert('O registo foi guardado, mas o email não foi confirmado. Verifique a configuração do envio. Não volte a emitir o recibo; pode tentar enviar o recibo existente pelo botão Enviar por email.');
+      return false;
+    } finally { state.sendingEmail = false; }
   }
 
   function renderReceiptPreview(receipt, status) {
@@ -2026,13 +2290,14 @@
     modal.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('modal-open');
     if (state.activeModal === modal) state.activeModal = null;
+    if (modal.id === 'request-review-modal') state.selectedPublicRequest = null;
     var previous = state.focusBeforeModal;
     state.focusBeforeModal = null;
     if (previous && document.contains(previous)) previous.focus();
   }
 
   function closeAllModals() {
-    ['member-modal', 'import-modal'].forEach(function (id) {
+    ['member-modal', 'import-modal', 'request-review-modal'].forEach(function (id) {
       var modal = byId(id);
       if (!modal) return;
       modal.dataset.pending = 'false';
@@ -2041,6 +2306,8 @@
     });
     state.activeModal = null;
     state.focusBeforeModal = null;
+    state.selectedPublicRequest = null;
+    state.pendingPublicRequest = false;
     document.body.classList.remove('modal-open');
   }
 
@@ -2215,11 +2482,48 @@
       syncReceiptQuotaPreview();
       receiptDraftChanged();
     });
+    listen(byId('email-receipt'), 'click', async function () {
+      if (!can('manageReceipts') || !state.lastIssuedReceipt || state.sendingEmail) return;
+      var recipient = valueOf('receipt-email');
+      if (!recipient) { showToast('Indique o email do destinatário.', true); byId('receipt-email').focus(); return; }
+      if (!isValidEmail(recipient)) { showToast('Indique um email válido.', true); return; }
+      if (window.confirm('Enviar o recibo n.º ' + state.lastIssuedReceipt.receipt_number + ' para ' + recipient + '?')) {
+        var ok = await sendEmail({ kind: 'receipt', receipt_id: state.lastIssuedReceipt.id, recipient: recipient });
+        if (ok) showToast('Email aceite pelo serviço de envio.');
+      }
+    });
     listen(byId('print-receipt'), 'click', printPersistedReceipt);
     listen(byId('receipt-history'), 'click', function (event) {
       var button = event.target.closest('[data-receipt-preview]');
       if (!button) return;
       previewPersistedReceipt(button.dataset.receiptPreview);
+    });
+
+    listen(byId('request-status-filter'), 'change', renderPublicRequests);
+    listen(byId('public-requests-table'), 'click', function (event) {
+      var button = event.target.closest('[data-review-public-request]');
+      if (!button) return;
+      var request = state.publicRequests.find(function (item) {
+        return item.id === button.dataset.reviewPublicRequest;
+      });
+      if (request) openPublicRequestReview(request);
+    });
+    listen(byId('close-request-review'), 'click', function () {
+      closeDialog(byId('request-review-modal'));
+    });
+    listen(byId('cancel-request-review'), 'click', function () {
+      closeDialog(byId('request-review-modal'));
+    });
+    listen(byId('approve-public-request'), 'click', function () {
+      reviewPublicRequest('approve');
+    });
+    listen(byId('reject-public-request'), 'click', function () {
+      reviewPublicRequest('reject');
+    });
+    listen(byId('request-review-modal'), 'mousedown', function (event) {
+      if (event.target === byId('request-review-modal')) {
+        closeDialog(byId('request-review-modal'));
+      }
     });
 
     listen(byId('export-button'), 'click', exportData);
