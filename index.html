@@ -55,7 +55,7 @@
       <div class="login-heading">
         <p class="eyebrow">Área reservada</p>
         <h1 id="login-title">Iniciar sessão</h1>
-        <p>Use a conta atribuída pela associação para aceder aos dados partilhados.</p>
+
       </div>
 
       <label class="field" for="login-email">
@@ -72,6 +72,10 @@
         <span>Não tem acesso à área reservada?</span>
         <a class="button button-secondary button-block" href="public.html">Tornar-me sócio, pagar quota ou doar</a>
       </div>
+      <nav class="social-links" aria-label="Redes sociais Team JM">
+        <a href="https://www.facebook.com/share/1LRqaKSXZt/?mibextid=wwXIfr" target="_blank" rel="noopener noreferrer" class="button button-secondary" aria-label="Facebook Team JM (nova janela)">Facebook</a>
+        <a href="https://www.instagram.com/teamjm2026/" target="_blank" rel="noopener noreferrer" class="button button-secondary" aria-label="Instagram Team JM (nova janela)">Instagram</a>
+      </nav>
     </form>
   </section>
 
@@ -144,6 +148,7 @@
         </div>
       </header>
 
+      <div id="email-delivery-status" class="form-hint" role="status" aria-live="polite" hidden></div>
       <section id="dashboard-view" class="view active-view" aria-labelledby="dashboard-heading">
         <div class="section-heading">
           <div>
@@ -352,6 +357,7 @@
                 <span>Morada <b aria-hidden="true">*</b></span>
                 <textarea id="receipt-address" rows="2" maxlength="500" autocomplete="street-address" required></textarea>
               </label>
+              <label class="field field-wide" for="receipt-email"><span>Email para envio do recibo (opcional)</span><input id="receipt-email" type="email" maxlength="320" autocomplete="email"></label>
               <label class="field field-wide" for="receipt-description">
                 <span>Descrição / referência <b aria-hidden="true">*</b></span>
                 <input id="receipt-description" type="text" maxlength="500" value="Quota" required>
@@ -360,6 +366,7 @@
             <p class="form-hint">Ao emitir uma quota, todos os anos selecionados serão atualizados no registo do sócio. A descrição do recibo identifica também os anos pagos anteriormente.</p>
             <div class="form-actions">
               <button id="issue-receipt-button" class="button button-primary" type="submit" data-role-allow="admin,staff" hidden>Emitir e guardar</button>
+              <button id="email-receipt" class="button button-secondary" type="button" data-role-allow="admin,staff" hidden>Enviar por email</button>
               <button id="print-receipt" class="button button-secondary" type="button" disabled>Imprimir recibo</button>
             </div>
           </form>
@@ -670,6 +677,19 @@
       </label>
 
       <p id="request-review-warning" class="form-hint"><strong>Atenção:</strong> aprove apenas depois de confirmar os dados e, quando aplicável, o pagamento.</p>
+      <div id="request-decision-options" hidden>
+        <h3 id="request-decision-title" tabindex="-1">Confirmar decisão</h3>
+        <p id="request-decision-summary" class="form-hint"></p>
+        <label id="request-cash-received-field" class="consent-field" for="request-cash-received" hidden><input id="request-cash-received" type="checkbox"><span>Confirmo que recebi o pagamento em dinheiro hoje.</span></label>
+        <label class="field" for="request-send-response"><span>Enviar a resposta por email? As notas da revisão serão incluídas.</span><select id="request-send-response"><option value="no">Não</option><option value="yes">Sim</option></select></label>
+        <label id="request-issue-receipt-field" class="field" for="request-issue-receipt"><span>Emitir recibo deste pagamento?</span><select id="request-issue-receipt"><option value="yes">Sim</option><option value="no">Não</option></select></label>
+        <label id="request-send-receipt-field" class="field" for="request-send-receipt"><span>Enviar também o recibo por email?</span><select id="request-send-receipt"><option value="no">Não</option><option value="yes">Sim</option></select></label>
+        <p class="form-hint">O envio requer a configuração do Gmail no servidor. Escolher Não não impede a aprovação nem a emissão do recibo.</p>
+        <div class="modal-actions">
+          <button id="back-request-decision" class="button button-secondary" type="button">Voltar à revisão</button>
+          <button id="confirm-request-decision" class="button button-primary" type="button">Confirmar</button>
+        </div>
+      </div>
       <div class="modal-actions">
         <button id="reject-public-request" class="button button-danger" type="button">Rejeitar pedido</button>
         <div class="primary-actions">

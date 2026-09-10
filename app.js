@@ -945,6 +945,13 @@
   function openPublicRequestReview(request) {
     if (!request || !can('managePublicRequests')) return;
     state.selectedPublicRequest = request;
+    state.publicRequestDecision = null;
+    setHidden(byId('request-decision-options'), true);
+    byId('request-cash-received').checked = false;
+    setHidden(byId('request-cash-received-field'), true);
+    setValue('request-send-response', 'no');
+    setValue('request-issue-receipt', 'yes');
+    setValue('request-send-receipt', 'no');
     setValue('request-review-id', request.id);
     setText('request-review-title', publicRequestTypeLabel(request.request_type));
     setText('request-review-reference', 'PED-' + request.request_number);
@@ -981,7 +988,7 @@
 
   function setPublicRequestReviewPending(pending) {
     state.pendingPublicRequest = pending;
-    ['approve-public-request', 'reject-public-request', 'cancel-request-review', 'close-request-review']
+    ['approve-public-request', 'reject-public-request', 'cancel-request-review', 'close-request-review', 'confirm-request-decision', 'back-request-decision', 'request-send-response', 'request-issue-receipt', 'request-send-receipt']
       .forEach(function (id) {
         var control = byId(id);
         if (control) control.disabled = pending;
@@ -995,6 +1002,28 @@
     }
   }
 
+  function preparePublicRequestDecision(decision) {
+    var request = state.selectedPublicRequest;
+    if (!request || request.status !== 'pending' || state.pendingPublicRequest || !can('managePublicRequests')) return;
+    if (decision === 'reject' && !valueOf('request-review-notes')) {
+      showToast('Indique o motivo da rejeição nas notas da revisão.', true);
+      byId('request-review-notes').focus();
+      return;
+    }
+    state.publicRequestDecision = decision;
+    var payment = decision === 'approve' && request.amount != null;
+    setHidden(byId('request-cash-received-field'), !payment || request.payment_method !== 'Dinheiro');
+    setText('request-decision-title', decision === 'approve' ? 'Confirmar aprovação' : 'Confirmar rejeição');
+    setText('request-decision-summary', 'Pedido PED-' + request.request_number + '. ' + (decision === 'reject' ? 'O pedido ficará rejeitado.' : payment ? 'O pagamento será registado.' : 'Será criado um novo sócio.') + ' Destinatário dos emails: ' + request.email);
+    setText('confirm-request-decision', decision === 'approve' ? 'Confirmar aprovação' : 'Confirmar rejeição');
+    setHidden(byId('request-issue-receipt-field'), !payment);
+    setHidden(byId('request-send-receipt-field'), !payment || valueOf('request-issue-receipt') !== 'yes');
+    setHidden(byId('approve-public-request'), true);
+    setHidden(byId('reject-public-request'), true);
+    setHidden(byId('request-decision-options'), false);
+    byId('request-decision-title').focus();
+  }
+
   async function reviewPublicRequest(decision) {
     var request = state.selectedPublicRequest;
     if (!request || request.status !== 'pending' || state.pendingPublicRequest || !can('managePublicRequests')) return;
@@ -1005,24 +1034,28 @@
       return;
     }
 
-    var actionLabel = decision === 'approve' ? 'aprovar' : 'rejeitar';
-    var consequence = request.request_type === 'membership'
-      ? 'A aprovação irá criar um novo sócio.'
-      : 'A aprovação irá registar o pagamento e emitir um recibo.';
-    if (!window.confirm(
-      'Pretende ' + actionLabel + ' o pedido PED-' + request.request_number + '?\n\n' +
-      (decision === 'approve' ? consequence : 'O pedido ficará registado como rejeitado.')
-    )) return;
-
+    if (decision !== 'approve' && decision !== 'reject') return;
+    if (decision === 'approve' && request.payment_method === 'Dinheiro' && !byId('request-cash-received').checked) {
+      showToast('Confirme a recepção do dinheiro. O pedido permanece pendente até ao pagamento.', true);
+      byId('request-cash-received').focus();
+      return;
+    }
+    var sendResponse = valueOf('request-send-response') === 'yes';
+    var issueRequested = decision === 'approve' && request.amount != null && valueOf('request-issue-receipt') === 'yes';
+    var sendReceipt = issueRequested && valueOf('request-send-receipt') === 'yes';
     setPublicRequestReviewPending(true);
     try {
       var result = await state.client.rpc('review_public_request', {
         p_request_id: request.id,
         p_decision: decision,
-        p_review_notes: notes || null
+        p_review_notes: notes || null,
+        p_issue_receipt: issueRequested,
+        p_cash_received: byId('request-cash-received').checked
       });
       if (result.error) throw result.error;
       var response = result.data || {};
+      if (sendResponse) await sendEmail({ kind: 'decision', request_id: request.id });
+      if (sendReceipt && response.receipt_id) await sendEmail({ kind: 'receipt', receipt_id: response.receipt_id, request_id: request.id });
       await refreshData();
       closeDialog(byId('request-review-modal'));
       state.selectedPublicRequest = null;
@@ -1112,6 +1145,8 @@
     }
     var print = byId('print-receipt');
     if (print) print.disabled = !can('printReceipts') || !state.lastIssuedReceipt;
+    var emailButton = byId('email-receipt');
+    if (emailButton) emailButton.disabled = !manageable || state.pendingReceipt || state.sendingEmail || !state.lastIssuedReceipt;
   }
 
   function switchView(view) {
@@ -1554,6 +1589,8 @@
   }
 
   function receiptMemberChanged() {
+    var emailMember = findMemberByReceiptSelection();
+    setValue('receipt-email', emailMember ? emailMember.email : '');
     var member = findMemberByReceiptSelection();
     setValue('receipt-name', member ? member.name : '');
     setValue('receipt-nif', member ? member.nif : '');
@@ -1649,6 +1686,9 @@
 
     try {
       var payload = receiptPayload();
+      var memberForEmail = findMemberByReceiptSelection();
+      var recipient = valueOf('receipt-email') || (memberForEmail && memberForEmail.email) || '';
+      var emailWanted = recipient && window.confirm('Enviar o recibo para ' + recipient + ' depois de emitido?');
       setReceiptPending(true);
       var result = await state.client.rpc('issue_receipt', { payload: payload });
       if (result.error) throw result.error;
@@ -1658,6 +1698,7 @@
       }
 
       state.lastIssuedReceipt = normalizeReceipt(receipt);
+      if (emailWanted) await sendEmail({ kind: 'receipt', receipt_id: receipt.id, recipient: recipient });
       await refreshData();
       renderIssuedReceipt(state.lastIssuedReceipt);
       applyReceiptPermissions();
@@ -1671,6 +1712,37 @@
     } finally {
       setReceiptPending(false);
     }
+  }
+
+  async function sendEmail(body) {
+    state.sendingEmail = true;
+    var label = body.kind === 'receipt' ? 'Recibo' : 'Resposta ao pedido';
+    try {
+      var result = await state.client.functions.invoke('send-email', { body: body });
+      if (result.error || !result.data || !result.data.ok) {
+        var detail = result.data && result.data.error;
+        if (result.error && result.error.context && typeof result.error.context.json === 'function') {
+          try { detail = (await result.error.context.json()).error; } catch (_parseError) {}
+        }
+        throw new Error(detail || 'Verifique a configuração da função send-email no Supabase.');
+      }
+      appendEmailStatus(label + (result.data.already_sent ? ': envio já registado anteriormente.' : ': envio aceite pelo Gmail. Confirme a receção com o destinatário.'));
+      return true;
+    } catch (error) {
+      appendEmailStatus(label + ': email não confirmado. ' + error.message + ' O registo continua guardado; não volte a emitir o recibo.');
+      showToast('O registo foi guardado, mas o email não foi confirmado. Verifique a configuração do envio. Não volte a emitir o recibo.', true);
+      return false;
+    } finally { state.sendingEmail = false; }
+  }
+
+  function appendEmailStatus(message) {
+    var status = byId('email-delivery-status');
+    if (!status) return;
+    var line = document.createElement('p');
+    line.textContent = message;
+    status.appendChild(line);
+    while (status.children.length > 4) status.removeChild(status.firstElementChild);
+    setHidden(status, false);
   }
 
   function renderReceiptPreview(receipt, status) {
@@ -1724,6 +1796,9 @@
       return;
     }
     state.lastIssuedReceipt = receipt;
+    var receiptMember = state.members.find(function (member) { return member.id === receipt.member_id; });
+    var receiptRequest = state.publicRequests.find(function (request) { return request.receipt_id === receipt.id; });
+    setValue('receipt-email', receiptRequest ? receiptRequest.email : receiptMember ? receiptMember.email || '' : '');
     renderIssuedReceipt(receipt);
     applyReceiptPermissions();
     var preview = byId('receipt-print-sheet');
@@ -2272,6 +2347,8 @@
   }
 
   function closeAllModals() {
+    var emailStatus = byId('email-delivery-status');
+    if (emailStatus) { emailStatus.textContent = ''; setHidden(emailStatus, true); }
     ['member-modal', 'import-modal', 'request-review-modal'].forEach(function (id) {
       var modal = byId(id);
       if (!modal) return;
@@ -2291,7 +2368,7 @@
       'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       root
     ).filter(function (element) {
-      return !element.hidden && element.getAttribute('aria-hidden') !== 'true';
+      return !element.closest('[hidden], [aria-hidden="true"]');
     });
   }
 
@@ -2457,6 +2534,16 @@
       syncReceiptQuotaPreview();
       receiptDraftChanged();
     });
+    listen(byId('email-receipt'), 'click', async function () {
+      if (!can('manageReceipts') || !state.lastIssuedReceipt || state.sendingEmail) return;
+      var recipient = valueOf('receipt-email');
+      if (!recipient) { showToast('Indique o email do destinatário.', true); byId('receipt-email').focus(); return; }
+      if (!isValidEmail(recipient)) { showToast('Indique um email válido.', true); return; }
+      if (window.confirm('Enviar o recibo n.º ' + state.lastIssuedReceipt.receipt_number + ' para ' + recipient + '?')) {
+        var ok = await sendEmail({ kind: 'receipt', receipt_id: state.lastIssuedReceipt.id, recipient: recipient });
+        if (ok) showToast('Email aceite pelo serviço de envio.');
+      }
+    });
     listen(byId('print-receipt'), 'click', printPersistedReceipt);
     listen(byId('receipt-history'), 'click', function (event) {
       var button = event.target.closest('[data-receipt-preview]');
@@ -2480,10 +2567,25 @@
       closeDialog(byId('request-review-modal'));
     });
     listen(byId('approve-public-request'), 'click', function () {
-      reviewPublicRequest('approve');
+      preparePublicRequestDecision('approve');
     });
     listen(byId('reject-public-request'), 'click', function () {
-      reviewPublicRequest('reject');
+      preparePublicRequestDecision('reject');
+    });
+    listen(byId('confirm-request-decision'), 'click', function () {
+      reviewPublicRequest(state.publicRequestDecision);
+    });
+    listen(byId('back-request-decision'), 'click', function () {
+      state.publicRequestDecision = null;
+      setHidden(byId('request-decision-options'), true);
+      setHidden(byId('approve-public-request'), false);
+      setHidden(byId('reject-public-request'), false);
+      byId('approve-public-request').focus();
+    });
+    listen(byId('request-issue-receipt'), 'change', function () {
+      var issue = valueOf('request-issue-receipt') === 'yes';
+      setHidden(byId('request-send-receipt-field'), !issue);
+      if (!issue) setValue('request-send-receipt', 'no');
     });
     listen(byId('request-review-modal'), 'mousedown', function (event) {
       if (event.target === byId('request-review-modal')) {

@@ -2185,3 +2185,13 @@ tbody tr:last-child td {
     margin-bottom: 5rem;
   }
 }
+
+
+/* Simpler entry and shared social links. */
+#login-button { margin-top: 1.25rem; }
+.login-card > .field { margin-bottom: 1rem; }
+.login-card { box-shadow: 0 8px 28px rgb(16 42 67 / .08); }
+.social-links { display: flex; flex-wrap: wrap; justify-content: center; gap: .65rem; margin-top: 1rem; }
+.public-header .social-links { margin-top: 0; }
+.panel { box-shadow: none; }
+#login-error:empty { display: none; }

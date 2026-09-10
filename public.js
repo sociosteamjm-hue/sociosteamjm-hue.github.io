@@ -73,7 +73,7 @@
     var type = valueOf('public-request-type') || 'membership';
     var previousType = typeControl ? typeControl.dataset.previousType || type : type;
     var isQuota = type === 'quota';
-    var hasPayment = type === 'quota' || type === 'donation';
+    var isMembership = type === 'membership';
     var memberNumber = byId('public-member-number');
     var quotaYear = byId('public-quota-year');
     var amount = byId('public-amount');
@@ -81,22 +81,35 @@
     var paymentDate = byId('public-payment-date');
     var paymentReference = byId('public-payment-reference');
 
+    var cashOption = byId('public-cash-option');
+    cashOption.hidden = !isMembership;
+    cashOption.disabled = !isMembership;
+    if (!isMembership && paymentMethod.value === 'Dinheiro') paymentMethod.value = 'Transferência bancária';
+    var isCash = isMembership && paymentMethod.value === 'Dinheiro';
+    setHidden(byId('public-membership-payment-note'), !isMembership);
+    setHidden(byId('public-cash-note'), !isCash);
+    setHidden(byId('public-payment-date-field'), isCash);
+    setHidden(byId('public-payment-reference-field'), isCash);
     setHidden(byId('public-member-number-field'), !isQuota);
     setHidden(byId('public-quota-year-field'), !isQuota);
-    setHidden(byId('public-payment-fields'), !hasPayment);
-    setHidden(byId('payment-instructions'), !hasPayment);
+    setHidden(byId('public-payment-fields'), false);
+    setHidden(byId('payment-instructions'), false);
 
     if (memberNumber) memberNumber.required = isQuota;
     if (quotaYear) quotaYear.required = isQuota;
     [amount, paymentMethod, paymentDate, paymentReference].forEach(function (control) {
-      if (control) control.required = hasPayment;
+      if (control) control.required = true;
+    });
+
+    [paymentDate, paymentReference].forEach(function (control) {
+      control.required = !isCash;
+      control.disabled = isCash;
     });
 
     if (amount) {
-      amount.readOnly = isQuota;
-      if (isQuota && state.config) amount.value = state.config.annualFee.toFixed(2);
-      if (!hasPayment) amount.value = '';
-      if (type === 'donation' && previousType === 'quota') amount.value = '';
+      amount.readOnly = isQuota || isMembership;
+      if ((isQuota || isMembership) && state.config) amount.value = state.config.annualFee.toFixed(2);
+      if (type === 'donation' && previousType !== 'donation') amount.value = '';
     }
     if (typeControl) typeControl.dataset.previousType = type;
   }
@@ -121,11 +134,11 @@
       payload.member_number = valueOf('public-member-number');
       payload.quota_year = valueOf('public-quota-year');
     }
-    if (type === 'quota' || type === 'donation') {
+    if (type === 'membership' || type === 'quota' || type === 'donation') {
       payload.amount = valueOf('public-amount');
       payload.payment_method = valueOf('public-payment-method');
-      payload.payment_date = valueOf('public-payment-date');
-      payload.payment_reference = valueOf('public-payment-reference');
+      payload.payment_date = payload.payment_method === 'Dinheiro' ? null : valueOf('public-payment-date');
+      payload.payment_reference = payload.payment_method === 'Dinheiro' ? null : valueOf('public-payment-reference');
     }
     return payload;
   }
@@ -218,6 +231,7 @@
       paymentDate.value = today;
       paymentDate.max = today;
     }
+    byId('public-payment-method').addEventListener('change', updateRequestType);
     byId('public-request-type').addEventListener('change', updateRequestType);
     byId('public-request-form').addEventListener('submit', submitRequest);
     byId('public-new-request').addEventListener('click', resetForm);

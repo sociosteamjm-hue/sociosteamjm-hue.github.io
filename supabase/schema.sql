@@ -1,5 +1,5 @@
--- TEAM JM UAT v2
--- Run this file only in the SQL editor of the separate UAT Supabase project.
+-- TEAM JM UAT v3
+-- Run this file only for an empty database. Existing UAT databases use the migrations below.
 -- It intentionally creates no production credentials or seed/member data.
 
 begin;
@@ -114,13 +114,14 @@ create table if not exists public.members (
 create table if not exists public.receipts (
   id uuid primary key default gen_random_uuid(),
   receipt_number bigint generated always as identity,
-  member_id uuid not null references public.members(id) on delete restrict,
-  member_number bigint not null,
+  member_id uuid references public.members(id) on delete restrict,
+  member_number bigint,
   receipt_date date not null default current_date,
   receipt_type varchar(40) not null,
   payment_method varchar(80) not null,
   payer_name varchar(200) not null,
   payer_tax_id varchar(32),
+  payer_address varchar(500) not null,
   amount numeric(12, 2) not null,
   description text not null,
   quota_year integer,
@@ -131,11 +132,19 @@ create table if not exists public.receipts (
   constraint receipts_receipt_number_positive check (receipt_number > 0),
   constraint receipts_member_number_positive check (member_number > 0),
   constraint receipts_payer_name_not_blank check (pg_catalog.btrim(payer_name) <> ''),
+  constraint receipts_payer_address_not_blank check (pg_catalog.btrim(payer_address) <> ''),
   constraint receipts_description_not_blank check (pg_catalog.btrim(description) <> ''),
   constraint receipts_amount_positive check (amount > 0),
   constraint receipts_quota_year_range check (quota_year is null or quota_year between 1900 and 2200),
   constraint receipts_type_allowed check (receipt_type in ('Quota', 'Inscrição', 'Donativo', 'Patrocínio', 'Outro')),
   constraint receipts_payment_allowed check (payment_method in ('Transferência bancária', 'Dinheiro', 'MB WAY', 'Cheque', 'Outro')),
+  constraint receipts_member_identity_pair check (
+    (member_id is null and member_number is null)
+    or (member_id is not null and member_number is not null)
+  ),
+  constraint receipts_member_required_for_non_donation check (
+    receipt_type = 'Donativo' or member_id is not null
+  ),
   constraint receipts_quota_year_matches_type check (
     (
       receipt_type = 'Quota'
@@ -582,6 +591,7 @@ declare
   v_payment_method text;
   v_payer_name text;
   v_payer_tax_id text;
+  v_payer_address text;
   v_amount numeric;
   v_description text;
   v_quota_year integer;
@@ -609,6 +619,11 @@ begin
     raise exception using errcode = '22023', message = 'payload must be a JSON object';
   end if;
 
+  v_receipt_type := pg_catalog.btrim(coalesce(payload ->> 'receipt_type', ''));
+  if v_receipt_type not in ('Quota', 'Inscrição', 'Donativo', 'Patrocínio', 'Outro') then
+    raise exception using errcode = '22023', message = 'receipt_type is invalid';
+  end if;
+
   v_text := nullif(pg_catalog.btrim(payload ->> 'member_id'), '');
   if v_text is not null then
     begin
@@ -633,21 +648,23 @@ begin
   end if;
 
   if v_member_id is null and v_member_number is null then
-    raise exception using errcode = '22023', message = 'member_id or member_number is required';
-  end if;
+    if v_receipt_type <> 'Donativo' then
+      raise exception using errcode = '22023', message = 'member_id or member_number is required for this receipt type';
+    end if;
+  else
+    select m.* into v_member
+    from public.members as m
+    where (v_member_id is null or m.id = v_member_id)
+      and (v_member_number is null or m.member_number = v_member_number)
+    for update;
 
-  select m.* into v_member
-  from public.members as m
-  where (v_member_id is null or m.id = v_member_id)
-    and (v_member_number is null or m.member_number = v_member_number)
-  for update;
+    if not found then
+      raise exception using errcode = 'P0002', message = 'Member not found, or member_id and member_number do not match';
+    end if;
 
-  if not found then
-    raise exception using errcode = 'P0002', message = 'Member not found, or member_id and member_number do not match';
-  end if;
-
-  if v_member.removed then
-    raise exception using errcode = '22023', message = 'A receipt cannot be issued to an archived member';
+    if v_member.removed then
+      raise exception using errcode = '22023', message = 'A receipt cannot be issued to an archived member';
+    end if;
   end if;
 
   v_text := nullif(pg_catalog.btrim(payload ->> 'receipt_date'), '');
@@ -660,11 +677,6 @@ begin
       when invalid_datetime_format or datetime_field_overflow then
         raise exception using errcode = '22023', message = 'receipt_date must be a valid ISO date';
     end;
-  end if;
-
-  v_receipt_type := pg_catalog.btrim(coalesce(payload ->> 'receipt_type', ''));
-  if v_receipt_type not in ('Quota', 'Inscrição', 'Donativo', 'Patrocínio', 'Outro') then
-    raise exception using errcode = '22023', message = 'receipt_type is invalid';
   end if;
 
   v_payment_method := pg_catalog.btrim(coalesce(payload ->> 'payment_method', ''));
@@ -763,6 +775,16 @@ begin
     nullif(pg_catalog.btrim(payload ->> 'payer_tax_id'), ''),
     v_member.nif
   );
+  v_payer_address := coalesce(
+    nullif(pg_catalog.btrim(payload ->> 'payer_address'), ''),
+    nullif(pg_catalog.btrim(v_member.address), '')
+  );
+  if v_payer_name is null then
+    raise exception using errcode = '22023', message = 'payer_name is required';
+  end if;
+  if v_payer_address is null then
+    raise exception using errcode = '22023', message = 'payer_address is required';
+  end if;
   if v_receipt_type = 'Quota' then
     -- Treat either the member ledger or an earlier receipt as evidence of
     -- payment. This prevents a duplicate even if someone later changes dues.
@@ -826,18 +848,19 @@ begin
 
   if pg_catalog.char_length(v_payer_name) > 200
     or pg_catalog.char_length(coalesce(v_payer_tax_id, '')) > 32
+    or pg_catalog.char_length(v_payer_address) > 500
     or (v_receipt_type <> 'Quota' and pg_catalog.char_length(v_description) > 500) then
     raise exception using errcode = '22023', message = 'A receipt text field is too long';
   end if;
 
   insert into public.receipts (
     member_id, member_number, receipt_date, receipt_type, payment_method,
-    payer_name, payer_tax_id, amount, description, quota_year, quota_years,
+    payer_name, payer_tax_id, payer_address, amount, description, quota_year, quota_years,
     created_by
   )
   values (
     v_member.id, v_member.member_number, v_receipt_date, v_receipt_type,
-    v_payment_method, v_payer_name, v_payer_tax_id, v_amount,
+    v_payment_method, v_payer_name, v_payer_tax_id, v_payer_address, v_amount,
     v_description, v_quota_year, v_quota_years, v_actor
   )
   returning * into v_receipt;
@@ -863,6 +886,460 @@ begin
   return v_receipt;
 end;
 $function$;
+
+do $block$
+begin
+  create type public.public_request_type as enum ('membership', 'quota', 'donation');
+exception
+  when duplicate_object then null;
+end;
+$block$;
+
+do $block$
+begin
+  create type public.public_request_status as enum ('pending', 'approved', 'rejected');
+exception
+  when duplicate_object then null;
+end;
+$block$;
+
+create table if not exists public.public_requests (
+  id uuid primary key default gen_random_uuid(),
+  request_number bigint generated always as identity,
+  request_type public.public_request_type not null,
+  status public.public_request_status not null default 'pending'::public.public_request_status,
+  member_number bigint,
+  quota_year integer,
+  name varchar(200) not null,
+  contact varchar(64),
+  nif varchar(32),
+  locality varchar(160),
+  address varchar(500) not null,
+  postal varchar(32),
+  email varchar(320) not null,
+  amount numeric(12, 2),
+  payment_method varchar(80),
+  payment_date date,
+  payment_reference varchar(120),
+  message varchar(2000),
+  consent_at timestamptz not null default pg_catalog.now(),
+  submitted_at timestamptz not null default pg_catalog.now(),
+  reviewed_at timestamptz,
+  reviewed_by uuid references auth.users(id) on delete set null,
+  review_notes varchar(2000),
+  member_id uuid references public.members(id) on delete restrict,
+  receipt_id uuid references public.receipts(id) on delete restrict,
+  constraint public_requests_request_number_key unique (request_number),
+  constraint public_requests_request_number_positive check (request_number > 0),
+  constraint public_requests_member_number_positive check (member_number is null or member_number > 0),
+  constraint public_requests_quota_year_range check (quota_year is null or quota_year between 1900 and 2200),
+  constraint public_requests_name_not_blank check (pg_catalog.btrim(name) <> ''),
+  constraint public_requests_address_not_blank check (pg_catalog.btrim(address) <> ''),
+  constraint public_requests_email_not_blank check (pg_catalog.btrim(email) <> ''),
+  constraint public_requests_amount_positive check (amount is null or amount > 0),
+  constraint public_requests_payment_allowed check (
+    payment_method is null or payment_method in ('Transferência bancária', 'MB WAY')
+  ),
+  constraint public_requests_fields_match_type check (
+    (
+      request_type = 'membership'::public.public_request_type
+      and quota_year is null
+      and amount is null
+      and payment_method is null
+      and payment_date is null
+      and payment_reference is null
+    )
+    or (
+      request_type = 'quota'::public.public_request_type
+      and member_number is not null
+      and quota_year is not null
+      and amount is not null
+      and payment_method is not null
+      and payment_date is not null
+      and payment_reference is not null
+    )
+    or (
+      request_type = 'donation'::public.public_request_type
+      and member_number is null
+      and quota_year is null
+      and amount is not null
+      and payment_method is not null
+      and payment_date is not null
+      and payment_reference is not null
+    )
+  ),
+  constraint public_requests_review_consistency check (
+    (
+      status = 'pending'::public.public_request_status
+      and reviewed_at is null
+      and reviewed_by is null
+      and member_id is null
+      and receipt_id is null
+    )
+    or (
+      status = 'rejected'::public.public_request_status
+      and reviewed_at is not null
+      and reviewed_by is not null
+      and member_id is null
+      and receipt_id is null
+    )
+    or (
+      status = 'approved'::public.public_request_status
+      and reviewed_at is not null
+      and reviewed_by is not null
+      and (
+        (request_type = 'membership'::public.public_request_type and member_id is not null and receipt_id is null)
+        or (request_type = 'quota'::public.public_request_type and member_id is not null and receipt_id is not null)
+        or (request_type = 'donation'::public.public_request_type and member_id is null and receipt_id is not null)
+      )
+    )
+  )
+);
+
+create index if not exists public_requests_status_submitted_idx
+  on public.public_requests (status, submitted_at desc);
+create index if not exists public_requests_email_submitted_idx
+  on public.public_requests ((pg_catalog.lower(email)), submitted_at desc);
+
+alter table public.public_requests enable row level security;
+
+drop policy if exists public_requests_read_reviewers on public.public_requests;
+create policy public_requests_read_reviewers
+on public.public_requests
+for select
+to authenticated
+using (public.current_app_role() in ('admin'::public.app_role, 'staff'::public.app_role));
+
+create or replace function public.submit_public_request(payload jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_request_type public.public_request_type;
+  v_name text;
+  v_contact text;
+  v_nif text;
+  v_locality text;
+  v_address text;
+  v_postal text;
+  v_email text;
+  v_message text;
+  v_member_number bigint;
+  v_quota_year integer;
+  v_amount numeric;
+  v_payment_method text;
+  v_payment_date date;
+  v_payment_reference text;
+  v_text text;
+  v_request public.public_requests%rowtype;
+begin
+  if payload is null or pg_catalog.jsonb_typeof(payload) <> 'object' then
+    raise exception using errcode = '22023', message = 'O pedido deve ser um objeto JSON.';
+  end if;
+
+  -- Campo invisível no formulário público. Bots que o preencham são rejeitados.
+  if nullif(pg_catalog.btrim(payload ->> 'website'), '') is not null then
+    raise exception using errcode = '22023', message = 'Não foi possível validar o pedido.';
+  end if;
+
+  begin
+    v_request_type := pg_catalog.btrim(coalesce(payload ->> 'request_type', ''))::public.public_request_type;
+  exception
+    when invalid_text_representation then
+      raise exception using errcode = '22023', message = 'Selecione um tipo de pedido válido.';
+  end;
+
+  v_name := nullif(pg_catalog.btrim(payload ->> 'name'), '');
+  v_contact := nullif(pg_catalog.btrim(payload ->> 'contact'), '');
+  v_nif := nullif(pg_catalog.btrim(payload ->> 'nif'), '');
+  v_locality := nullif(pg_catalog.btrim(payload ->> 'locality'), '');
+  v_address := nullif(pg_catalog.btrim(payload ->> 'address'), '');
+  v_postal := nullif(pg_catalog.btrim(payload ->> 'postal'), '');
+  v_email := pg_catalog.lower(nullif(pg_catalog.btrim(payload ->> 'email'), ''));
+  v_message := nullif(pg_catalog.btrim(payload ->> 'message'), '');
+
+  if v_name is null then
+    raise exception using errcode = '22023', message = 'Indique o nome da pessoa ou entidade.';
+  end if;
+  if v_address is null then
+    raise exception using errcode = '22023', message = 'Indique a morada.';
+  end if;
+  if v_email is null or pg_catalog.strpos(v_email, '@') < 2 then
+    raise exception using errcode = '22023', message = 'Indique um email válido.';
+  end if;
+  if coalesce((payload ->> 'consent')::boolean, false) is not true then
+    raise exception using errcode = '22023', message = 'É necessário aceitar o tratamento dos dados para enviar o pedido.';
+  end if;
+
+  if pg_catalog.char_length(v_name) > 200
+    or pg_catalog.char_length(coalesce(v_contact, '')) > 64
+    or pg_catalog.char_length(coalesce(v_nif, '')) > 32
+    or pg_catalog.char_length(coalesce(v_locality, '')) > 160
+    or pg_catalog.char_length(v_address) > 500
+    or pg_catalog.char_length(coalesce(v_postal, '')) > 32
+    or pg_catalog.char_length(v_email) > 320
+    or pg_catalog.char_length(coalesce(v_message, '')) > 2000 then
+    raise exception using errcode = '22023', message = 'Um dos campos excede o tamanho permitido.';
+  end if;
+
+  if (
+    select pg_catalog.count(*)
+    from public.public_requests as recent
+    where pg_catalog.lower(recent.email) = v_email
+      and recent.submitted_at >= pg_catalog.clock_timestamp() - interval '1 hour'
+  ) >= 5 then
+    raise exception using errcode = 'P0001', message = 'Foram enviados demasiados pedidos para este email. Tente novamente mais tarde.';
+  end if;
+
+  if v_request_type = 'membership'::public.public_request_type then
+    null;
+  else
+    v_payment_method := nullif(pg_catalog.btrim(payload ->> 'payment_method'), '');
+    if v_payment_method not in ('Transferência bancária', 'MB WAY') then
+      raise exception using errcode = '22023', message = 'Selecione um método de pagamento válido.';
+    end if;
+
+    v_payment_reference := nullif(pg_catalog.btrim(payload ->> 'payment_reference'), '');
+    if v_payment_reference is null then
+      raise exception using errcode = '22023', message = 'Indique a referência ou descrição do pagamento.';
+    end if;
+    if pg_catalog.char_length(v_payment_reference) > 120 then
+      raise exception using errcode = '22023', message = 'A referência do pagamento é demasiado longa.';
+    end if;
+
+    v_text := nullif(pg_catalog.btrim(payload ->> 'payment_date'), '');
+    begin
+      v_payment_date := v_text::date;
+    exception
+      when invalid_datetime_format or datetime_field_overflow then
+        raise exception using errcode = '22023', message = 'Indique uma data de pagamento válida.';
+    end;
+    if v_payment_date is null then
+      raise exception using errcode = '22023', message = 'Indique a data do pagamento.';
+    end if;
+    if v_payment_date > current_date then
+      raise exception using errcode = '22023', message = 'A data do pagamento não pode ser futura.';
+    end if;
+
+    v_text := nullif(pg_catalog.btrim(payload ->> 'amount'), '');
+    begin
+      v_amount := v_text::numeric;
+    exception
+      when invalid_text_representation or numeric_value_out_of_range then
+        raise exception using errcode = '22023', message = 'Indique um valor válido.';
+    end;
+    if v_amount is null or v_amount <= 0 or v_amount > 9999999999.99 then
+      raise exception using errcode = '22023', message = 'O valor deve ser superior a zero.';
+    end if;
+  end if;
+
+  if v_request_type = 'quota'::public.public_request_type then
+    v_text := nullif(pg_catalog.btrim(payload ->> 'member_number'), '');
+    if v_text is null or v_text !~ '^[1-9][0-9]*$' then
+      raise exception using errcode = '22023', message = 'Indique um número de sócio válido.';
+    end if;
+    begin
+      v_member_number := v_text::bigint;
+    exception
+      when numeric_value_out_of_range then
+        raise exception using errcode = '22023', message = 'O número de sócio é demasiado grande.';
+    end;
+
+    v_text := nullif(pg_catalog.btrim(payload ->> 'quota_year'), '');
+    if v_text is null or v_text !~ '^[0-9]{4}$' then
+      raise exception using errcode = '22023', message = 'Selecione um ano de quota válido.';
+    end if;
+    v_quota_year := v_text::integer;
+    if v_quota_year < 1900 or v_quota_year > 2200 then
+      raise exception using errcode = '22023', message = 'O ano da quota está fora do intervalo permitido.';
+    end if;
+  end if;
+
+  insert into public.public_requests (
+    request_type, member_number, quota_year, name, contact, nif, locality,
+    address, postal, email, amount, payment_method, payment_date,
+    payment_reference, message
+  )
+  values (
+    v_request_type, v_member_number, v_quota_year, v_name, v_contact, v_nif,
+    v_locality, v_address, v_postal, v_email, v_amount, v_payment_method,
+    v_payment_date, v_payment_reference, v_message
+  )
+  returning * into v_request;
+
+  return pg_catalog.jsonb_build_object(
+    'id', v_request.id,
+    'request_number', v_request.request_number,
+    'status', v_request.status
+  );
+exception
+  when invalid_text_representation then
+    raise exception using errcode = '22023', message = 'Os dados enviados não são válidos.';
+end;
+$function$;
+
+create or replace function public.review_public_request(
+  p_request_id uuid,
+  p_decision text,
+  p_review_notes text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor uuid := auth.uid();
+  v_role public.app_role;
+  v_decision text := pg_catalog.lower(pg_catalog.btrim(coalesce(p_decision, '')));
+  v_notes text := nullif(pg_catalog.btrim(p_review_notes), '');
+  v_request public.public_requests%rowtype;
+  v_member public.members%rowtype;
+  v_receipt public.receipts%rowtype;
+  v_member_id uuid;
+  v_receipt_id uuid;
+begin
+  if v_actor is null then
+    raise exception using errcode = '42501', message = 'É necessário iniciar sessão.';
+  end if;
+
+  select app_user.role into v_role
+  from public.app_users as app_user
+  where app_user.user_id = v_actor;
+
+  if v_role is null or v_role not in ('admin'::public.app_role, 'staff'::public.app_role) then
+    raise exception using errcode = '42501', message = 'Apenas administradores ou membros da equipa podem rever pedidos.';
+  end if;
+
+  if v_decision not in ('approve', 'reject') then
+    raise exception using errcode = '22023', message = 'A decisão deve ser aprovar ou rejeitar.';
+  end if;
+  if pg_catalog.char_length(coalesce(v_notes, '')) > 2000 then
+    raise exception using errcode = '22023', message = 'As notas de revisão são demasiado longas.';
+  end if;
+  if v_decision = 'reject' and v_notes is null then
+    raise exception using errcode = '22023', message = 'Indique o motivo da rejeição.';
+  end if;
+
+  select request.* into v_request
+  from public.public_requests as request
+  where request.id = p_request_id
+  for update;
+
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Pedido não encontrado.';
+  end if;
+  if v_request.status <> 'pending'::public.public_request_status then
+    raise exception using errcode = '22023', message = 'Este pedido já foi revisto.';
+  end if;
+
+  if v_decision = 'reject' then
+    update public.public_requests as request
+    set status = 'rejected'::public.public_request_status,
+        reviewed_at = pg_catalog.clock_timestamp(),
+        reviewed_by = v_actor,
+        review_notes = v_notes
+    where request.id = v_request.id;
+
+    return pg_catalog.jsonb_build_object(
+      'request_number', v_request.request_number,
+      'status', 'rejected'
+    );
+  end if;
+
+  if v_request.request_type = 'membership'::public.public_request_type then
+    insert into public.members (
+      name, contact, nif, locality, address, postal, email, registration_date,
+      notes, dues, updated_by
+    )
+    values (
+      v_request.name, v_request.contact, v_request.nif, v_request.locality,
+      v_request.address, v_request.postal, v_request.email, current_date,
+      pg_catalog.concat(
+        'Criado a partir do pedido público n.º ', v_request.request_number,
+        case when v_request.message is null then '' else '. Mensagem: ' || v_request.message end
+      ),
+      '{}'::jsonb, v_actor
+    )
+    returning * into v_member;
+    v_member_id := v_member.id;
+  elsif v_request.request_type = 'quota'::public.public_request_type then
+    select member.* into v_member
+    from public.members as member
+    where member.member_number = v_request.member_number
+      and not member.removed
+    for update;
+
+    if not found then
+      raise exception using errcode = 'P0002', message = 'Sócio ativo não encontrado.';
+    end if;
+
+    v_receipt := public.issue_receipt(pg_catalog.jsonb_build_object(
+      'member_id', v_member.id,
+      'receipt_date', v_request.payment_date,
+      'receipt_type', 'Quota',
+      'payment_method', v_request.payment_method,
+      'payer_name', v_request.name,
+      'payer_tax_id', coalesce(v_request.nif, ''),
+      'payer_address', v_request.address,
+      'amount', v_request.amount,
+      'description', 'Quota',
+      'quota_years', pg_catalog.jsonb_build_array(v_request.quota_year),
+      'quota_year', v_request.quota_year
+    ));
+    v_member_id := v_member.id;
+    v_receipt_id := v_receipt.id;
+  else
+    v_receipt := public.issue_receipt(pg_catalog.jsonb_build_object(
+      'receipt_date', v_request.payment_date,
+      'receipt_type', 'Donativo',
+      'payment_method', v_request.payment_method,
+      'payer_name', v_request.name,
+      'payer_tax_id', coalesce(v_request.nif, ''),
+      'payer_address', v_request.address,
+      'amount', v_request.amount,
+      'description', coalesce(v_request.message, 'Donativo')
+    ));
+    v_receipt_id := v_receipt.id;
+  end if;
+
+  update public.public_requests as request
+  set status = 'approved'::public.public_request_status,
+      reviewed_at = pg_catalog.clock_timestamp(),
+      reviewed_by = v_actor,
+      review_notes = v_notes,
+      member_id = v_member_id,
+      member_number = coalesce(v_member.member_number, request.member_number),
+      receipt_id = v_receipt_id
+  where request.id = v_request.id;
+
+  return pg_catalog.jsonb_build_object(
+    'request_number', v_request.request_number,
+    'status', 'approved',
+    'member_number', v_member.member_number,
+    'receipt_number', v_receipt.receipt_number
+  );
+end;
+$function$;
+
+revoke all on type public.public_request_type, public.public_request_status from public, anon, authenticated;
+grant usage on type public.public_request_type, public.public_request_status to authenticated;
+
+revoke all on table public.public_requests from public, anon, authenticated;
+grant select on table public.public_requests to authenticated;
+
+revoke all on sequence public.public_requests_request_number_seq from public, anon, authenticated;
+
+revoke all on function public.submit_public_request(jsonb) from public, anon, authenticated;
+revoke all on function public.review_public_request(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.submit_public_request(jsonb) to anon, authenticated;
+grant execute on function public.review_public_request(uuid, text, text) to authenticated;
+
+grant usage on schema public to anon, authenticated;
+
+notify pgrst, 'reload schema';
 
 -- Remove PostgreSQL's permissive default function/table access and add back
 -- only what the browser application needs. RLS remains the final row boundary.
