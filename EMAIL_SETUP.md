@@ -15,7 +15,7 @@ Em Supabase → Edge Functions → Secrets, guardar:
 | --- | --- |
 | EMAIL_FROM | sociosteamjm@gmail.com |
 | GMAIL_APP_PASSWORD | Palavra-passe de aplicação criada nessa conta Google |
-| CONTACT_EMAIL | Opcional: endereço de contacto a incluir nos emails. Enquanto não estiver definido, aparece apenas o telefone 963 069 801. |
+| CONTACT_EMAIL | `teamjm29@gmail.com`. Este é também o endereço usado por defeito quando o Secret não está definido. |
 
 Não usar a password normal. Não enviar a credencial por mensagem nem guardá-la no GitHub ou em supabase-config.js. O ficheiro .env.example é apenas uma referência sem credenciais. Não são necessários Resend nem EMAIL_PROVIDER.
 SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY são disponibilizadas pelo ambiente Supabase; nunca colocar a service role no browser.

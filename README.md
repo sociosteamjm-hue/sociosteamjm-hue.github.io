@@ -12,7 +12,7 @@ de publicar os ficheiros actualizados. Esta migração mantém os dados existent
 Os emails de confirmação da adesão, aprovação/rejeição e recibo PDF exigem a
 publicação das duas Edge Functions descritas em [EMAIL_SETUP.md](EMAIL_SETUP.md),
 antes de publicar o frontend. O endereço adicional de contacto é configurável
-através de `CONTACT_EMAIL`; enquanto não for definido, usa-se apenas o telefone.
+através de `CONTACT_EMAIL`; por defeito, usa-se `teamjm29@gmail.com`, juntamente com o telefone 963 069 801.
 
 Para corrigir o único recibo de testes de UAT de 15 para 1, executar manualmente
 [uat_renumber_single_receipt.sql](supabase/maintenance/uat_renumber_single_receipt.sql)

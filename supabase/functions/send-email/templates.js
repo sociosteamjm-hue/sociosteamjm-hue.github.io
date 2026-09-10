@@ -1,5 +1,5 @@
 export function contactFooter(contactEmail = '') {
-  const email = String(contactEmail).trim();
+  const email = String(contactEmail).trim() || 'teamjm29@gmail.com';
   const extra = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email) ? ' ou envie um email para ' + email : '';
   return '\n\nPor favor, não responda a este email. Para esclarecer dúvidas, contacte-nos pelo número 963 069 801' + extra + '.\n\nObrigado,\nAssociação Team JM';
 }

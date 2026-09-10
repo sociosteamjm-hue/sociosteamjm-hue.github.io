@@ -16,6 +16,7 @@ export function testTemplates() {
   assert(decisionEmail({ ...request, status: 'rejected' }).text.includes('não o repita'), 'Avoid duplicate payment');
   assert(contactFooter().includes('não responda') && !contactFooter().includes('definir'), 'No placeholder address');
   assert(contactFooter('contact@example.com').includes('contact@example.com'), 'Configured contact');
+  assert(contactFooter().includes('teamjm29@gmail.com') && contactFooter('').includes('teamjm29@gmail.com'), 'Default association contact');
   assert(receiptEmail({ payer_name: 'Ana', receipt_number: 5, amount: 12, description: 'Quota' }).text.includes('em anexo'), 'PDF email');
   return 'Email template checks passed.';
 }
