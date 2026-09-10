@@ -23,7 +23,7 @@ SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY são disponibilizada
 ## 3. Publicar
 
 Publicar duas Edge Functions: `send-email` e `submit-public-request`.
-A pasta `send-email` inclui `index.ts`, `templates.js` e `receipt-pdf.js`; todos estes ficheiros são necessários. Se usar o editor do Supabase, adicionar também os dois módulos JS, com os mesmos nomes e caminhos relativos. A função `submit-public-request` tem o seu próprio `index.ts`.
+A pasta `send-email` inclui `index.ts`, `templates.js`, `receipt-pdf.js`, `receipt-model.js` e `receipt-logo.js`; todos estes ficheiros são necessários. Se usar o editor do Supabase, adicionar também os quatro módulos JS, com os mesmos nomes e caminhos relativos. A função `submit-public-request` tem o seu próprio `index.ts`.
 
 O envio liga ao Gmail por TLS na porta 465. Respostas e recibos exigem sessão válida e perfil admin/staff. A confirmação automática da adesão é pedida pelo servidor, depois de guardar o pedido, usando a chave de serviço apenas no servidor. A função pública não aceita destinatários de email nem referências a pedidos já existentes para envio: usa o ID devolvido pela submissão validada na base de dados.
 
@@ -43,7 +43,15 @@ Abrir um recibo de teste guardado, preencher um email controlado pela associaç�
 Verificar o resultado no site, os Enviados do Gmail e a caixa de entrada/spam do destinatário. Aceitação pelo Gmail não garante entrega.
 
 Testar também um pedido: Sim/Não para resposta, emissão e envio do recibo.
-O recibo segue em PDF anexo, gerado no servidor a partir dos dados guardados do recibo. O corpo do email contém uma mensagem curta e os contactos. O PDF apresenta os dados do recibo num modelo próprio; não é uma captura visual da página de impressão.
+O recibo segue em PDF anexo, gerado no servidor a partir do recibo já guardado na aprovação ou emissão. O site, a impressão e o PDF partilham o modelo `receipt-model.js`: campos, formatação, posições, quebras de linha e paginação são definidos uma única vez. O site apresenta as páginas vectoriais desse modelo e o servidor exporta o mesmo documento para PDF. A geração não cria outro recibo nem altera a numeração, os dados do pagador ou as quotas. O corpo do email contém uma mensagem curta e os contactos.
+
+Para instalar o modelo comum numa função já publicada:
+
+1. Em `send-email`, substituir `receipt-pdf.js`, adicionar `receipt-model.js` ao mesmo nível e confirmar que `receipt-logo.js` está presente. Carregar em **Deploy updates**.
+2. No site/Git, publicar `app.js`, `index.html`, `styles.css`, `receipt-preview.js`, `vendor/pdf-lib-1.17.1.min.js`, `vendor/PDF-LIB-LICENSE.txt` e os módulos `supabase/functions/send-email/receipt-model.js` e `supabase/functions/send-email/receipt-logo.js`. Manter exactamente estes caminhos: o site importa os mesmos módulos publicados na função.
+3. Actualizar a página com Ctrl+F5 e abrir um recibo existente no histórico. Conferir a pré-visualização e a impressão. Não é necessário emitir outro recibo para testar a apresentação.
+
+Esta alteração não exige SQL nem alterações a `submit-public-request` ou aos Secrets. O logótipo está incluído no módulo JS, derivado de `assets/JM.png`, e não depende de pedidos ao site durante o envio. A biblioteca PDF-Lib está incluída no site para usar as mesmas medidas de texto e paginação do servidor; não é carregada de um CDN.
 O email geral impresso no recibo continua separado do remetente.
 
 Submeter uma adesão com cada método de pagamento e verificar a confirmação com referência PED, valor, IBAN, MB WAY e aviso de validação pela equipa. O envio não aprova a adesão nem marca a quota como paga. Se o Gmail falhar, o site mantém a referência e informa que o pedido foi guardado; não repetir a submissão. Staff/admin pode tentar a confirmação com `kind: acknowledgement` e `request_id` na função autenticada, respeitando os mesmos bloqueios de duplicados/envios incertos.
@@ -55,6 +63,7 @@ Testes sem credenciais nem envios reais (Node 22+):
     node supabase/functions/send-email/handler.mock-test.mjs
     node supabase/functions/send-email/templates.test.mjs
     node supabase/functions/submit-public-request/handler.mock-test.mjs
+    node receipt-preview.test.mjs
 
 Teste do PDF com a dependência real (Deno):
 

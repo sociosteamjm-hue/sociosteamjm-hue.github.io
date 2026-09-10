@@ -14,6 +14,12 @@ publicação das duas Edge Functions descritas em [EMAIL_SETUP.md](EMAIL_SETUP.m
 antes de publicar o frontend. O endereço adicional de contacto é configurável
 através de `CONTACT_EMAIL`; por defeito, usa-se `teamjm29@gmail.com`, juntamente com o telefone 963 069 801.
 
+A pré-visualização, impressão e PDF do recibo usam um único modelo em
+`supabase/functions/send-email/receipt-model.js`. O site importa esse módulo
+através de `receipt-preview.js`; o envio importa-o através de `receipt-pdf.js`.
+Ambos apresentam o recibo já guardado, sem emitir outro nem alterar o seu número.
+Os ficheiros e passos de publicação estão em [EMAIL_SETUP.md](EMAIL_SETUP.md).
+
 Para corrigir o único recibo de testes de UAT de 15 para 1, executar manualmente
 [uat_renumber_single_receipt.sql](supabase/maintenance/uat_renumber_single_receipt.sql)
 no SQL Editor de UAT. O script conserva o recibo, os sócios e as quotas pagas,
