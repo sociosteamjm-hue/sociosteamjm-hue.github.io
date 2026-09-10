@@ -22,6 +22,14 @@ SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY são disponibilizada
 
 ## 3. Publicar
 
+**Editor do Dashboard com erro “Module not found”:** substituir todo o conteúdo
+do `index.ts` da função `send-email` pelo conteúdo de
+`supabase/deploy/send-email-dashboard.ts` e carregar em **Deploy updates**.
+Esta versão inclui os módulos e o logótipo num só ficheiro e não depende dos
+ficheiros auxiliares do editor. Não colar este ficheiro em `receipt-pdf.js`.
+O ficheiro é gerado a partir dos mesmos módulos usados no site. Após alterações
+nesses módulos, regenerar com `python supabase/deploy/build-dashboard.py`.
+
 Publicar duas Edge Functions: `send-email` e `submit-public-request`.
 A pasta `send-email` inclui `index.ts`, `templates.js`, `receipt-pdf.js`, `receipt-model.js` e `receipt-logo.js`; todos estes ficheiros são necessários. Se usar o editor do Supabase, adicionar também os quatro módulos JS, com os mesmos nomes e caminhos relativos. A função `submit-public-request` tem o seu próprio `index.ts`.
 
