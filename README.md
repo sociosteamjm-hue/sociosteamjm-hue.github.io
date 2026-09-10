@@ -1,5 +1,26 @@
 # TEAM JM — UAT v3
 
+Para ativar recibos/respostas por Gmail e as opções de aprovação, seguir
+[EMAIL_SETUP.md](EMAIL_SETUP.md), incluindo migrações 005 e 006 e publicação
+da função send-email. As credenciais ficam apenas nos Secrets do Supabase.
+
+Para activar os pagamentos na adesão, aplicar também
+[007_membership_payments.sql](supabase/migrations/007_membership_payments.sql)
+no SQL Editor do mesmo projecto Supabase de UAT, depois da migração 006 e antes
+de publicar os ficheiros actualizados. Esta migração mantém os dados existentes.
+
+Os emails de confirmação da adesão, aprovação/rejeição e recibo PDF exigem a
+publicação das duas Edge Functions descritas em [EMAIL_SETUP.md](EMAIL_SETUP.md),
+antes de publicar o frontend. O endereço adicional de contacto é configurável
+através de `CONTACT_EMAIL`; enquanto não for definido, usa-se apenas o telefone.
+
+Para corrigir o único recibo de testes de UAT de 15 para 1, executar manualmente
+[uat_renumber_single_receipt.sql](supabase/maintenance/uat_renumber_single_receipt.sql)
+no SQL Editor de UAT. O script conserva o recibo, os sócios e as quotas pagas,
+e deixa o próximo número em 2. Interrompe a operação se não existir exactamente
+um recibo com o número esperado. Não altera cópias já enviadas/impressas e não
+faz parte das migrações automáticas.
+
 This directory is the v3 application upgrade for the existing pre-live Supabase database used by UAT v2. It intentionally keeps the same Supabase URL and browser-safe publishable key. No second Supabase project is required while this database remains the shared pre-live environment.
 
 The database design includes:
@@ -235,3 +256,9 @@ UAT testing does not replace a production backup. Before enabling or running a r
 5. keep the source spreadsheet and backup under the association's data-protection controls.
 
 Do not reuse this UAT project's URL, keys, test users, or synthetic data as a production migration shortcut.
+
+### UAT: membership payments (migration 007)
+
+Apply `supabase/migrations/007_membership_payments.sql` after migration 006 and before publishing the updated frontend. New membership applications include the annual fee and bank transfer, MB WAY or cash. Cash stays pending until staff explicitly confirms receipt on approval (recorded as received today). Membership approval creates the member and marks the payment year as paid, with an optional receipt. Historical applications without payment keep their previous behavior.
+
+Verify in UAT: submit each membership payment method; confirm cash needs no date/reference; reject cash approval without receipt confirmation; approve with and without a receipt and check the member quota; retry approval and verify no duplicate member/receipt; check existing quota and donation flows.

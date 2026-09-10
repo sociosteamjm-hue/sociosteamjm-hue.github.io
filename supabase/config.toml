@@ -1,0 +1,5 @@
+[functions.send-email]
+verify_jwt = true
+
+[functions.submit-public-request]
+verify_jwt = false

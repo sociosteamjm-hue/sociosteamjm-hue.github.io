@@ -23,12 +23,15 @@
       <div><strong>Team JM</strong><span>Associação</span></div>
     </a>
     <div class="public-header-actions">
+      <nav class="social-links" aria-label="Redes sociais Team JM">
+        <a href="https://www.facebook.com/share/1LRqaKSXZt/?mibextid=wwXIfr" target="_blank" rel="noopener noreferrer" class="button button-secondary social-icon" aria-label="Facebook Team JM (nova janela)" title="Facebook"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.413c0-3.025 1.792-4.697 4.533-4.697 1.312 0 2.686.236 2.686.236v2.971h-1.513c-1.491 0-1.956.931-1.956 1.887v2.263h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg></a>
+        <a href="https://www.instagram.com/teamjm2026/" target="_blank" rel="noopener noreferrer" class="button button-secondary social-icon" aria-label="Instagram Team JM (nova janela)" title="Instagram"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="17.5" cy="6.5" r="1.25"/></svg></a>
+      </nav>
       <button id="theme-toggle" class="button button-secondary" type="button" aria-pressed="false" aria-label="Ativar modo escuro" title="Ativar modo escuro">
         <svg class="theme-icon theme-icon--moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 15.1A8.4 8.4 0 0 1 8.9 3.3 9 9 0 1 0 20.7 15.1ZM12 20a7 7 0 0 1-5.2-11.7 10.4 10.4 0 0 0 8.9 8.9A7 7 0 0 1 12 20Z"/></svg>
         <svg class="theme-icon theme-icon--sun" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 1h2v3h-2V1Zm0 19h2v3h-2v-3ZM3.5 4.9l1.4-1.4L7 5.6 5.6 7 3.5 4.9Zm13.4 13.5 1.4-1.4 2.1 2.1-1.4 1.4-2.1-2.1ZM1 11h3v2H1v-2Zm19 0h3v2h-3v-2ZM3.5 19.1 5.6 17 7 18.4l-2.1 2.1-1.4-1.4ZM16.9 5.6 19 3.5l1.4 1.4L18.4 7l-1.5-1.4ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>
         <span id="theme-toggle-label">Modo escuro</span>
       </button>
-      <a class="button button-secondary" href="index.html">Área reservada</a>
     </div>
   </header>
 
@@ -45,9 +48,8 @@
           <h2>Como funciona</h2>
           <ol>
             <li>Escolha o tipo de pedido e preencha os dados.</li>
-            <li>Para quotas ou donativos, efetue primeiro o pagamento.</li>
+            <li>Escolha o método e efetue o pagamento. Na adesão, pode escolher dinheiro e pagar depois à equipa.</li>
             <li>A equipa verifica o pedido e aprova-o ou rejeita-o.</li>
-            <li>Quando aprovado, o registo e o recibo são criados na área reservada.</li>
           </ol>
         </section>
         <section id="payment-instructions" class="panel public-info-card" hidden>
@@ -57,7 +59,7 @@
             <div><dt>MB WAY</dt><dd>963 069 801</dd></div>
             <div><dt>Titular</dt><dd>Associação Team JM</dd></div>
           </dl>
-          <p class="form-hint"><strong>Importante:</strong> enviar este formulário não confirma o pagamento. A equipa irá verificá-lo antes da aprovação.</p>
+          <p class="form-hint"><strong>Importante:</strong> todos os métodos de pagamento — MB WAY, transferência bancária e dinheiro — requerem validação pela equipa. O pedido fica pendente e a quota só fica paga após essa validação.</p>
         </section>
       </aside>
 
@@ -75,7 +77,7 @@
               <span>O que pretende fazer? <b aria-hidden="true">*</b></span>
               <select id="public-request-type" required>
                 <option value="membership">Quero tornar-me sócio</option>
-                <option value="quota">Quero comunicar o pagamento de uma quota</option>
+                <option value="quota">Quero pagar as minhas quotas</option>
                 <option value="donation">Quero fazer um donativo</option>
               </select>
             </label>
@@ -120,7 +122,9 @@
           </div>
 
           <fieldset id="public-payment-fields" class="public-payment-fields" hidden>
-            <legend>Pagamento comunicado</legend>
+            <legend>Pagamento</legend>
+            <p id="public-membership-payment-note" class="form-hint">Após efectuar o pagamento e a equipa o confirmar, a quota da adesão fica paga para o ano corrente.</p>
+            <p id="public-cash-note" class="form-hint" hidden>Entregue o dinheiro à equipa. O processo fica pendente até à recepção e confirmação do pagamento.</p>
             <div class="form-grid">
               <label class="field" for="public-amount">
                 <span>Valor (€) <b aria-hidden="true">*</b></span>
@@ -131,13 +135,14 @@
                 <select id="public-payment-method">
                   <option value="Transferência bancária">Transferência bancária</option>
                   <option value="MB WAY">MB WAY</option>
+                  <option id="public-cash-option" value="Dinheiro">Dinheiro</option>
                 </select>
               </label>
-              <label class="field" for="public-payment-date">
+              <label id="public-payment-date-field" class="field" for="public-payment-date">
                 <span>Data do pagamento <b aria-hidden="true">*</b></span>
                 <input id="public-payment-date" type="date">
               </label>
-              <label class="field" for="public-payment-reference">
+              <label id="public-payment-reference-field" class="field" for="public-payment-reference">
                 <span>Referência ou descrição <b aria-hidden="true">*</b></span>
                 <input id="public-payment-reference" type="text" maxlength="120" placeholder="Ex.: nome usado na transferência">
               </label>
@@ -167,8 +172,9 @@
           <div class="public-success-icon" aria-hidden="true">✓</div>
           <p class="eyebrow">Pedido recebido</p>
           <h2 id="public-success-title">Obrigado pelo contacto</h2>
-          <p>O pedido ficou pendente de verificação pela equipa.</p>
+          <p>O pedido ficou pendente de verificação dos dados e validação do pagamento pela equipa, incluindo pagamentos por MB WAY e transferência bancária.</p>
           <p class="public-reference">Referência: <strong id="public-request-reference">—</strong></p>
+          <p id="public-email-status" role="status"></p>
           <button id="public-new-request" class="button button-secondary" type="button">Enviar outro pedido</button>
         </section>
       </section>
